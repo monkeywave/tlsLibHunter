@@ -31,10 +31,10 @@ setup(
     description=("Identifies TLS/SSL libraries in running processes using Frida-based dynamic instrumentation."),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/fkie-cad/tlsLibHunter",
+    url="https://github.com/monkeywave/tlsLibHunter",
     author=about.__author__,
     author_email="daniel.baier@fkie.fraunhofer.de",
-    license="GPL-3.0-only",
+    license="MIT",
     packages=find_packages(exclude=("tests",)),
     python_requires=">=3.8",
     install_requires=install_requires,
@@ -46,7 +46,7 @@ setup(
     },
     include_package_data=True,
     classifiers=[
-        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Natural Language :: English",
         "Programming Language :: Python :: 3 :: Only",
@@ -61,7 +61,7 @@ setup(
         ],
     },
     project_urls={
-        "Source": "https://github.com/fkie-cad/tlsLibHunter",
-        "Issues": "https://github.com/fkie-cad/tlsLibHunter/issues",
+        "Source": "https://github.com/monkeywave/tlsLibHunter",
+        "Issues": "https://github.com/monkeywave/tlsLibHunter/issues",
     },
 )

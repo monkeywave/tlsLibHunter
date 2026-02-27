@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/tlsLibHunter)](https://pypi.org/project/tlsLibHunter/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/tlsLibHunter)](https://pypi.org/project/tlsLibHunter/)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
-[![License](https://img.shields.io/pypi/l/tlsLibHunter)](https://github.com/monkeywave/tlsLibHunter/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/monkeywave/tlsLibHunter)](https://github.com/monkeywave/tlsLibHunter/blob/main/LICENSE)
 
 Identify and extract TLS/SSL libraries from running processes using dynamic instrumentation.
 

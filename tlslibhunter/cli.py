@@ -28,7 +28,9 @@ examples:
     p.add_argument("target", metavar="TARGET", help="Process name, PID, or package name")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument(
-        "-l", "--list-only", action="store_true",
+        "-l",
+        "--list-only",
+        action="store_true",
         help="Only list TLS libraries (no extraction). Overridden by -o",
     )
     p.add_argument("-o", "--output", metavar="DIR", default=None, help="Output directory for extracted libs")

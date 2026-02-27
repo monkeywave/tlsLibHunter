@@ -42,8 +42,7 @@ class HunterConfig:
         # Deprecation shim: if someone passes a string to mobile, migrate to serial
         if isinstance(self.mobile, str):
             warnings.warn(
-                "Passing a serial string to 'mobile' is deprecated. "
-                "Use serial='...' instead.",
+                "Passing a serial string to 'mobile' is deprecated. Use serial='...' instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )

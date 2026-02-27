@@ -114,9 +114,7 @@ class TestFingerprintDataIntegrity:
 
     def test_each_fingerprint_has_strings(self):
         for fp in LIBRARY_FINGERPRINTS:
-            assert len(fp.fingerprint_strings) > 0, (
-                f"{fp.library_type} has no fingerprint strings"
-            )
+            assert len(fp.fingerprint_strings) > 0, f"{fp.library_type} has no fingerprint strings"
 
     def test_each_fingerprint_has_library_type(self):
         for fp in LIBRARY_FINGERPRINTS:

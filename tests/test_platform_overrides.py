@@ -24,9 +24,7 @@ class TestAndroidPlatformOverrides:
 
     def test_apex_libssl_is_boringssl(self):
         """Android APEX libssl should be identified as BoringSSL."""
-        info = self.clf.classify_module(
-            "libssl.so", "/apex/com.android.conscrypt/lib64/libssl.so"
-        )
+        info = self.clf.classify_module("libssl.so", "/apex/com.android.conscrypt/lib64/libssl.so")
         assert info["library_type"] == "boringssl"
 
     def test_app_libssl_stays_openssl(self):
@@ -39,9 +37,7 @@ class TestAndroidPlatformOverrides:
 
     def test_gnutls_not_overridden(self):
         """GnuTLS should not be overridden even on system path."""
-        info = self.clf.classify_module(
-            "libgnutls.so", "/system/lib64/libgnutls.so"
-        )
+        info = self.clf.classify_module("libgnutls.so", "/system/lib64/libgnutls.so")
         assert info["library_type"] == "gnutls"
 
 
@@ -51,30 +47,22 @@ class TestMacOSPlatformOverrides:
 
     def test_system_libcrypto_is_libressl(self):
         """macOS system libcrypto should be identified as LibreSSL."""
-        info = self.clf.classify_module(
-            "libcrypto.44.dylib", "/usr/lib/libcrypto.44.dylib"
-        )
+        info = self.clf.classify_module("libcrypto.44.dylib", "/usr/lib/libcrypto.44.dylib")
         assert info["library_type"] == "libressl"
 
     def test_system_libssl_is_libressl(self):
         """macOS system libssl should be identified as LibreSSL."""
-        info = self.clf.classify_module(
-            "libssl.48.dylib", "/usr/lib/libssl.48.dylib"
-        )
+        info = self.clf.classify_module("libssl.48.dylib", "/usr/lib/libssl.48.dylib")
         assert info["library_type"] == "libressl"
 
     def test_homebrew_stays_openssl(self):
         """Homebrew-installed OpenSSL should stay as openssl."""
-        info = self.clf.classify_module(
-            "libssl.3.dylib", "/opt/homebrew/lib/libssl.3.dylib"
-        )
+        info = self.clf.classify_module("libssl.3.dylib", "/opt/homebrew/lib/libssl.3.dylib")
         assert info["library_type"] == "openssl"
 
     def test_macports_stays_openssl(self):
         """MacPorts-installed OpenSSL should stay as openssl."""
-        info = self.clf.classify_module(
-            "libssl.3.dylib", "/opt/local/lib/libssl.3.dylib"
-        )
+        info = self.clf.classify_module("libssl.3.dylib", "/opt/local/lib/libssl.3.dylib")
         assert info["library_type"] == "openssl"
 
 
@@ -89,9 +77,7 @@ class TestChromiumOverrides:
 
     def test_libchrome_is_boringssl_linux(self):
         clf = ModuleClassifier("linux")
-        info = clf.classify_module(
-            "libchrome.so", "/opt/google/chrome/libchrome.so"
-        )
+        info = clf.classify_module("libchrome.so", "/opt/google/chrome/libchrome.so")
         assert info["library_type"] == "boringssl"
 
     def test_libwebview_is_boringssl(self):

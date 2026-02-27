@@ -98,7 +98,7 @@ class ModuleClassifier:
 
             # macOS system libraries are LibreSSL
             if self.platform == "macos" and path_lower.startswith("/usr/lib/"):
-                    return "libressl"
+                return "libressl"
 
         # Chromium modules use BoringSSL regardless of platform
         chromium_modules = ("libmonochrome", "libchrome", "libwebview")

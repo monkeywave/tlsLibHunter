@@ -166,9 +166,7 @@ class ModuleScanner:
                     try:
                         found_fp_hex = self._exports.scan_for_strings(name, fp_hex_patterns)
                         if found_fp_hex:
-                            matched_fingerprints = [
-                                fp_hex_to_string[h] for h in found_fp_hex if h in fp_hex_to_string
-                            ]
+                            matched_fingerprints = [fp_hex_to_string[h] for h in found_fp_hex if h in fp_hex_to_string]
                             fingerprint_type, detected_version = fingerprint_library(matched_fingerprints)
                             if fingerprint_type != "unknown":
                                 logger.info(
@@ -181,7 +179,11 @@ class ModuleScanner:
                         logger.debug("Fingerprint scan error for %s: %s", name, e)
 
                 info = self._classifier.classify_module(
-                    name, path, matched_exports, fingerprint_type, detected_version,
+                    name,
+                    path,
+                    matched_exports,
+                    fingerprint_type,
+                    detected_version,
                 )
                 lib = DetectedLibrary(
                     name=name,

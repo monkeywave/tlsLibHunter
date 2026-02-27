@@ -9,9 +9,9 @@ import time
 from typing import Any
 
 from tlslibhunter.scanner.classifier import ModuleClassifier
+from tlslibhunter.scanner.fingerprints import fingerprint_library, get_all_fingerprint_strings
 from tlslibhunter.scanner.results import DetectedLibrary, ScanResult
 from tlslibhunter.scanner.tls_indicators import TLS_EXPORT_SYMBOLS, TLS_STRING_PATTERNS
-from tlslibhunter.scanner.fingerprints import fingerprint_library, get_all_fingerprint_strings
 from tlslibhunter.utils.encoding import build_scan_patterns
 
 logger = logging.getLogger("tlslibhunter.scanner")

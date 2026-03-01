@@ -1,9 +1,7 @@
 # TLSLibHunter
-
-[![PyPI version](https://img.shields.io/pypi/v/tlsLibHunter)](https://pypi.org/project/tlsLibHunter/)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/tlsLibHunter)](https://pypi.org/project/tlsLibHunter/)
+![version](https://img.shields.io/badge/version-0.1.3-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
-[![License](https://img.shields.io/github/license/monkeywave/tlsLibHunter)](https://github.com/monkeywave/tlsLibHunter/blob/main/LICENSE)
+
 
 Identify and extract TLS/SSL libraries from running processes using dynamic instrumentation.
 
@@ -80,7 +78,4 @@ extractions = hunter.extract(result, output_dir="./extracted_libs")
 - Clean Python API for programmatic use
 - Backend abstraction (currently only frida but might be extended to other frameworks in the future)
 
-## License
-
-MIT
 

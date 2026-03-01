@@ -45,10 +45,10 @@ INFO: Detected: libmonochrome_64.so (boringssl, app)
 INFO: Scan complete: 2 TLS libraries found in 298 modules (8.06s)
         				TLS Libraries in 'Chrome' (android)                    
 ┏━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ #    ┃ Library             ┃ Type      ┃ Class  ┃      Size ┃ Path                                                                                                                                     ┃
+┃ #    ┃ Library             ┃ Type      ┃ Class  ┃      Size ┃ Path                       ┃
 ┡━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1    │ libssl.so           │ boringssl │ system │ 376.0 KiB │ /apex/com.… │
-│ 2    │ libmonochrome_64.so │ boringssl │ app    │ 119.1 MiB │ /data/app/~~NlI… │
+│ 1    │ libssl.so           │ boringssl │ system │ 376.0 KiB │ /apex/com.…                │
+│ 2    │ libmonochrome_64.so │ boringssl │ app    │ 119.1 MiB │ /data/app/~~NlI…           │
 └──────┴─────────────────────┴───────────┴────────┴───────────┴────────────────────────────┘
 
 Scanned 298 modules in 8.06s

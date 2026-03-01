@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from tlslibhunter.platforms.detection import get_platform_handler
 from tlslibhunter.scanner.tls_indicators import identify_library_type
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger("tlslibhunter.scanner.classifier")
 

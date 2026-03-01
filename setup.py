@@ -28,7 +28,7 @@ install_requires = [
 setup(
     name="tlsLibHunter",
     version=about.__version__,
-    description=("Identifies TLS/SSL libraries in running processes using Frida-based dynamic instrumentation."),
+    description="Identifies TLS/SSL libraries in running processes using Frida-based dynamic instrumentation.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/monkeywave/tlsLibHunter",

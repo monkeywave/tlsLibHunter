@@ -4,16 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tlslibhunter.output._utils import human_size as _human_size
+
 if TYPE_CHECKING:
     from tlslibhunter.scanner.results import ExtractionResult, ScanResult
-
-
-def _human_size(n: int) -> str:
-    for unit in ("B", "KiB", "MiB", "GiB"):
-        if n < 1024.0 or unit == "GiB":
-            return f"{n:.1f} {unit}"
-        n /= 1024.0
-    return f"{n:.1f} B"
 
 
 class TableFormatter:

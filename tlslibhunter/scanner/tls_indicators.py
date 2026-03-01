@@ -72,7 +72,6 @@ TLS_EXPORT_SYMBOLS: dict[str, str] = {
 }
 
 # Known TLS library file name patterns -> library type
-# Map of substring/regex patterns in library names to TLS implementation type
 KNOWN_TLS_LIBRARIES: dict[str, str] = {
     # OpenSSL
     "libssl": "openssl",
@@ -125,7 +124,7 @@ KNOWN_TLS_LIBRARIES: dict[str, str] = {
 
 def identify_library_type(
     name: str,
-    matched_exports: list[str] = None,
+    matched_exports: list[str] | None = None,
     fingerprint_type: str | None = None,
 ) -> str:
     """Identify TLS library type from name, fingerprint, and/or matched exports.

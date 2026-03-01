@@ -29,22 +29,9 @@ def build_scan_patterns(target: str) -> list[str]:
         target: The string to encode (e.g., "CLIENT_RANDOM")
 
     Returns:
-        List of unique hex pattern strings for Frida Memory.scanSync()
+        List of hex pattern strings for Frida Memory.scanSync()
     """
-    patterns = []
-
-    # ASCII encoding (most common)
-    patterns.append(ascii_to_hex(target))
-
-    # UTF-16LE encoding (Windows DLLs)
-    patterns.append(utf16le_to_hex(target))
-
-    # Deduplicate while preserving order
-    seen = set()
-    unique = []
-    for p in patterns:
-        if p not in seen:
-            seen.add(p)
-            unique.append(p)
-
-    return unique
+    return [
+        ascii_to_hex(target),
+        utf16le_to_hex(target),
+    ]

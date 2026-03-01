@@ -30,10 +30,7 @@ class AndroidHandler(PlatformHandler):
     def is_system_library(self, name: str, path: str) -> bool:
         if not path:
             return True
-        for prefix in SYSTEM_LIB_PREFIXES:
-            if path.startswith(prefix):
-                return True
-        return any(path.startswith(prefix) for prefix in SYSTEM_DATA_PREFIXES)
+        return any(path.startswith(prefix) for prefix in SYSTEM_LIB_PREFIXES + SYSTEM_DATA_PREFIXES)
 
     def is_app_library(self, path: str, package_name: str | None = None) -> bool:
         if not path:

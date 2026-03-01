@@ -14,6 +14,8 @@ TLS_STRING_PATTERNS: list[str] = [
     "EARLY_EXPORTER_SECRET",
     "CLIENT_EARLY_TRAFFIC_SECRET",
     "SSLKEYLOGFILE",
+    "c hs traffic",
+    "master secret",
 ]
 
 # Known TLS library export symbols for library type detection

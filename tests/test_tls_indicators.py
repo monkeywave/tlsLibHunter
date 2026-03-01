@@ -24,6 +24,10 @@ class TestTLSStringPatterns:
         assert "EXPORTER_SECRET" in TLS_STRING_PATTERNS
         assert "EARLY_EXPORTER_SECRET" in TLS_STRING_PATTERNS
 
+    def test_contains_internal_tls_labels(self):
+        assert "c hs traffic" in TLS_STRING_PATTERNS
+        assert "master secret" in TLS_STRING_PATTERNS
+
     def test_no_duplicates(self):
         assert len(TLS_STRING_PATTERNS) == len(set(TLS_STRING_PATTERNS))
 

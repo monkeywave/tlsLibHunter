@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 530" width="620" height="530">
+  <defs>
+    <linearGradient id="screenGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a3d5c"/>
+      <stop offset="100%" stop-color="#062a3e"/>
+    </linearGradient>
+    <linearGradient id="monitorGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2744"/>
+      <stop offset="100%" stop-color="#0f1a2e"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <filter id="textShadow">
+      <feDropShadow dx="1" dy="2" stdDeviation="1" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+    <filter id="greenGlow">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#00cc66" flood-opacity="0.5"/>
+    </filter>
+    <clipPath id="screenClip">
+      <rect x="115" y="175" width="390" height="240" rx="8"/>
+    </clipPath>
+    <clipPath id="lensClip">
+      <circle cx="310" cy="400" r="48"/>
+    </clipPath>
+  </defs>
+
+  <!-- === WINGS === -->
+  <polygon points="55,195 150,228 150,168 95,148 45,168" fill="#143a50" stroke="#1e5a7c" stroke-width="1.5"/>
+  <polygon points="35,218 150,248 150,198 75,178 25,198" fill="#18425a" stroke="#1e5a7c" stroke-width="1.5"/>
+  <polygon points="50,243 150,268 150,228 85,213 40,228" fill="#1c4a62" stroke="#1e5a7c" stroke-width="1.5"/>
+  <polygon points="565,195 470,228 470,168 525,148 575,168" fill="#143a50" stroke="#1e5a7c" stroke-width="1.5"/>
+  <polygon points="585,218 470,248 470,198 545,178 595,198" fill="#18425a" stroke="#1e5a7c" stroke-width="1.5"/>
+  <polygon points="570,243 470,268 470,228 535,213 580,228" fill="#1c4a62" stroke="#1e5a7c" stroke-width="1.5"/>
+
+  <!-- === MONITOR BODY === -->
+  <rect x="95" y="155" width="430" height="280" rx="18" fill="url(#monitorGrad)" stroke="#2a3a55" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="100" y="160" width="420" height="270" rx="15" fill="none" stroke="#3a4a65" stroke-width="1" opacity="0.5"/>
+
+  <!-- === SCREEN === -->
+  <rect x="115" y="175" width="390" height="240" rx="8" fill="url(#screenGrad)"/>
+  
+  <!-- Binary code background -->
+  <g clip-path="url(#screenClip)" opacity="0.3" fill="#00cc66" font-family="'Courier New', monospace" font-size="14" font-weight="bold">
+    <text x="120" y="310">10011010 01101001 10110100</text>
+    <text x="120" y="328">01010110 10011101 01001011</text>
+    <text x="120" y="346">11001010 01110101 10100110</text>
+    <text x="120" y="364">00110101 10110010 11010011</text>
+    <text x="120" y="382">10101001 01001110 01101100</text>
+    <text x="120" y="400">01100101 11010100 10011010</text>
+  </g>
+
+  <!-- === TLS LIBRARY STACK on screen (left side) === -->
+  <g clip-path="url(#screenClip)">
+    <!-- Book spines representing TLS libraries being identified -->
+    <!-- Book 1 (bottom) - OpenSSL -->
+    <rect x="138" y="362" width="58" height="14" rx="2" fill="#0d3320" stroke="#00cc66" stroke-width="1" opacity="0.8"/>
+    <text x="167" y="373" text-anchor="middle" font-family="'Courier New', monospace" font-size="7.5" fill="#00cc66" opacity="0.9">OpenSSL</text>
+    
+    <!-- Book 2 - GnuTLS -->
+    <rect x="138" y="345" width="58" height="14" rx="2" fill="#0d2033" stroke="#4488cc" stroke-width="1" opacity="0.8"/>
+    <text x="167" y="356" text-anchor="middle" font-family="'Courier New', monospace" font-size="7.5" fill="#4488cc" opacity="0.9">GnuTLS</text>
+    
+    <!-- Book 3 - mbedTLS -->
+    <rect x="138" y="328" width="58" height="14" rx="2" fill="#240d33" stroke="#aa66dd" stroke-width="1" opacity="0.8"/>
+    <text x="167" y="339" text-anchor="middle" font-family="'Courier New', monospace" font-size="7.5" fill="#aa66dd" opacity="0.9">mbedTLS</text>
+
+    <!-- Book 4 (top) - BoringSSL -->
+    <rect x="138" y="311" width="58" height="14" rx="2" fill="#332d0d" stroke="#ddaa33" stroke-width="1" opacity="0.8"/>
+    <text x="167" y="322" text-anchor="middle" font-family="'Courier New', monospace" font-size="7" fill="#ddaa33" opacity="0.9">BoringSSL</text>
+
+    <!-- Scanning bracket around the stack -->
+    <rect x="132" y="307" width="70" height="73" rx="4" fill="none" stroke="#00cc66" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.55"/>
+    
+    <!-- Scanning beam -->
+    <line x1="132" y1="340" x2="202" y2="340" stroke="#00cc66" stroke-width="2" opacity="0.7">
+      <animate attributeName="y1" values="310;377;310" dur="2.5s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="310;377;310" dur="2.5s" repeatCount="indefinite"/>
+    </line>
+
+    <!-- Arrow from stack to ID result -->
+    <path d="M208,343 L228,343" fill="none" stroke="#00cc66" stroke-width="1.5" opacity="0.5"/>
+    <polygon points="228,340 235,343 228,346" fill="#00cc66" opacity="0.5"/>
+    
+    <!-- ID result badge -->
+    <rect x="238" y="333" width="40" height="20" rx="4" fill="#00cc66" fill-opacity="0.12" stroke="#00cc66" stroke-width="1" opacity="0.7"/>
+    <text x="258" y="347" text-anchor="middle" font-family="'Courier New', monospace" font-size="10" fill="#00cc66" font-weight="bold" opacity="0.85">ID ✓</text>
+  </g>
+
+  <!-- === TITLE TEXT === -->
+  <text x="310" y="248" text-anchor="middle" font-family="'Impact', 'Arial Black', sans-serif" font-size="82" font-weight="900" fill="#00cc66" filter="url(#textShadow)" letter-spacing="4">TLS LIB</text>
+  <text x="310" y="318" text-anchor="middle" font-family="'Impact', 'Arial Black', sans-serif" font-size="82" font-weight="900" fill="#ffffff" filter="url(#textShadow)" letter-spacing="6">HUNTER</text>
+
+  <!-- === MAGNIFYING GLASS WITH FINGERPRINT === -->
+  <!-- Handle -->
+  <line x1="355" y1="430" x2="400" y2="475" stroke="#888" stroke-width="14" stroke-linecap="round"/>
+  <line x1="355" y1="430" x2="400" y2="475" stroke="#aaa" stroke-width="10" stroke-linecap="round"/>
+  
+  <!-- Glass body -->
+  <circle cx="310" cy="400" r="52" fill="#062a3e" stroke="#bbb" stroke-width="7" filter="url(#shadow)"/>
+  <circle cx="310" cy="400" r="52" fill="none" stroke="#ddd" stroke-width="4"/>
+  
+  <!-- Fingerprint inside lens — library identification metaphor -->
+  <g clip-path="url(#lensClip)">
+    <g transform="translate(310, 393)" stroke="#00cc66" fill="none" stroke-width="2" opacity="0.8" filter="url(#greenGlow)">
+      <path d="M-30,10 Q-30,-20 0,-20 Q30,-20 30,10"/>
+      <path d="M-23,12 Q-23,-14 0,-14 Q23,-14 23,12"/>
+      <path d="M-16,13 Q-16,-8 0,-8 Q16,-8 16,13"/>
+      <path d="M-9,13 Q-9,-2 0,-2 Q9,-2 9,13"/>
+      <path d="M-3,10 Q-3,3 0,3 Q3,3 3,10"/>
+    </g>
+    <!-- ".so" text at fingerprint center — shared library extension -->
+    <text x="310" y="420" text-anchor="middle" font-family="'Courier New', monospace" font-size="13" fill="#00cc66" font-weight="bold" opacity="0.65">.so</text>
+  </g>
+
+  <!-- === MONITOR STAND === -->
+  <rect x="265" y="440" width="90" height="15" rx="3" fill="#1a2744"/>
+  <path d="M240,455 L380,455 L370,470 L250,470 Z" fill="#151e33"/>
+</svg>

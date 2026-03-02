@@ -1,5 +1,12 @@
+<div align="center">
+    <img src="misc/tlslibhunter-logo.png" alt="TlsLibHunter Logo" width="300"/>
+    <p>Identifying TLS Libraries Within Processes</p><strong></strong></div></p>
+</div>
+
+
+
 # TLSLibHunter
-![version](https://img.shields.io/badge/version-0.1.3-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
+![version](https://img.shields.io/badge/version-0.1.4-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
 
 

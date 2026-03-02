@@ -1,6 +1,6 @@
 <div align="center">
     <img src="misc/tlslibhunter-logo.png" alt="TlsLibHunter Logo" width="300"/>
-    <p>Identifying TLS Libraries Within Processes</p><strong></strong></div></p>
+    <p></p><strong>Identifying TLS Libraries Within Processes</strong></div></p>
 </div>
 
 

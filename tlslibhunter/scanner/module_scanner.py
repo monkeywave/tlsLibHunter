@@ -121,11 +121,18 @@ class ModuleScanner:
         logger.debug("Built %d fingerprint hex patterns", len(fp_hex_patterns))
 
         scanned = 0
+        seen_paths: set[str] = set()  # Deduplicate modules loaded at multiple addresses
         for mod in modules:
             name = mod.get("name", "")
             path = mod.get("path", "")
             base = mod.get("base", "")
             size = int(mod.get("size", 0) or 0)
+
+            # Skip duplicate modules (same library mapped at different addresses)
+            if path in seen_paths:
+                logger.debug("Skipping %s (duplicate path, different base address)", name)
+                continue
+            seen_paths.add(path)
 
             # Skip modules not worth scanning
             if not self._classifier.is_scan_worthy(name, path):

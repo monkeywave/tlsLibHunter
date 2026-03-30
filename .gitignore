@@ -49,3 +49,7 @@ htmlcov/
 # Build artifacts
 *.manifest
 *.spec
+
+# misc
+research/
+research_State.txt

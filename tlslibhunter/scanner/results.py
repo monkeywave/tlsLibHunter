@@ -21,6 +21,8 @@ class DetectedLibrary:
     matched_exports: list[str] = field(default_factory=list)
     matched_fingerprints: list[str] = field(default_factory=list)
     detected_version: str = ""
+    detection_reason: str = ""
+    extended_scan_hits: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +36,8 @@ class DetectedLibrary:
             "matched_exports": self.matched_exports,
             "matched_fingerprints": self.matched_fingerprints,
             "detected_version": self.detected_version,
+            "detection_reason": self.detection_reason,
+            "extended_scan_hits": self.extended_scan_hits,
         }
 
 
@@ -48,6 +52,7 @@ class ScanResult:
     total_modules_scanned: int = 0
     scan_duration_seconds: float = 0.0
     errors: list[str] = field(default_factory=list)
+    pipeline_stats: dict[str, int] = field(default_factory=dict)
 
     @property
     def tls_library_count(self) -> int:
@@ -63,6 +68,7 @@ class ScanResult:
             "scan_duration_seconds": self.scan_duration_seconds,
             "tls_library_count": self.tls_library_count,
             "errors": self.errors,
+            "pipeline_stats": self.pipeline_stats,
         }
 
 

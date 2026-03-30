@@ -23,6 +23,11 @@ class HunterConfig:
         format: Output format ("table", "json", "plain").
         debug: Enable debug logging.
         verbose: Show all scanned modules.
+        scan_mode: Scanning mode ("standard" or "labels").
+        scan_split_constants: Search for split substrings of TLS string patterns.
+        scan_stack_strings: Scan writable memory for runtime-assembled stack strings.
+        scan_rwx_regions: Scan process-wide RWX (JIT) memory regions.
+        scan_encoded_strings: Search for XOR/base64-encoded TLS strings.
     """
 
     target: str = ""
@@ -37,6 +42,11 @@ class HunterConfig:
     format: str = "table"
     debug: bool = False
     verbose: bool = False
+    scan_mode: str = "standard"
+    scan_split_constants: bool = False
+    scan_stack_strings: bool = False
+    scan_rwx_regions: bool = False
+    scan_encoded_strings: bool = False
 
     def __post_init__(self):
         # Deprecation shim: if someone passes a string to mobile, migrate to serial

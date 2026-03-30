@@ -10,6 +10,8 @@ from tlslibhunter.extractor.android_extractor import AdbPullExtractor, ApkInnerE
 from tlslibhunter.extractor.base import Extractor
 from tlslibhunter.extractor.disk_extractor import DiskExtractor
 from tlslibhunter.extractor.ios_extractor import IOSExtractor
+from tlslibhunter.extractor.dyld_cache_extractor import DyldCacheExtractor
+from tlslibhunter.extractor.native_dsc_extractor import NativeDscExtractor
 from tlslibhunter.extractor.memory_extractor import MemoryExtractor
 from tlslibhunter.platforms.detection import get_platform_handler
 from tlslibhunter.scanner.results import DetectedLibrary, ExtractionResult
@@ -23,6 +25,8 @@ EXTRACTORS: dict[str, type] = {
     "adb_pull": AdbPullExtractor,
     "apk_extract": AdbPullExtractor,  # Alias; uses same adb pull logic
     "frida_read": IOSExtractor,
+    "dsc_native": NativeDscExtractor,
+    "dyld_cache": DyldCacheExtractor,
     "memory_dump": MemoryExtractor,
 }
 

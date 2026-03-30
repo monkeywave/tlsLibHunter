@@ -50,6 +50,31 @@ examples:
     p.add_argument("-v", "--verbose", action="store_true", help="Show all scanned modules")
     p.add_argument("--backend", choices=["frida"], default="frida", help="Instrumentation backend (default: frida)")
     p.add_argument("--timeout", type=int, default=10, metavar="SEC", help="Attachment timeout in seconds (default: 10)")
+    p.add_argument(
+        "--scan-labels",
+        action="store_true",
+        help="Raw label scan: scan ALL modules for TLS HKDF/PRF labels without filtering",
+    )
+    p.add_argument(
+        "--scan-split-constants",
+        action="store_true",
+        help="Search for split substrings of TLS string patterns",
+    )
+    p.add_argument(
+        "--scan-stack-strings",
+        action="store_true",
+        help="Scan writable memory for runtime-assembled stack strings",
+    )
+    p.add_argument(
+        "--scan-rwx-regions",
+        action="store_true",
+        help="Scan process-wide RWX (JIT) memory regions",
+    )
+    p.add_argument(
+        "--scan-encoded-strings",
+        action="store_true",
+        help="Search for XOR/base64-encoded TLS strings",
+    )
     return p
 
 
@@ -68,6 +93,12 @@ def main(argv: list[str] | None = None) -> int:
     from tlslibhunter.hunter import TLSLibHunter
     from tlslibhunter.output import get_formatter
 
+    if args.scan_labels:
+        args.scan_split_constants = True
+        args.scan_stack_strings = True
+        args.scan_rwx_regions = True
+        args.scan_encoded_strings = True
+
     config = HunterConfig(
         target=args.target,
         mobile=args.mobile or (args.serial is not None),
@@ -81,6 +112,11 @@ def main(argv: list[str] | None = None) -> int:
         format=args.format,
         debug=args.debug,
         verbose=args.verbose,
+        scan_mode="labels" if args.scan_labels else "standard",
+        scan_split_constants=args.scan_split_constants,
+        scan_stack_strings=args.scan_stack_strings,
+        scan_rwx_regions=args.scan_rwx_regions,
+        scan_encoded_strings=args.scan_encoded_strings,
     )
 
     formatter = get_formatter(config.format)
@@ -110,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
             should_extract = not config.list_only or config.output_dir is not None
             if should_extract:
                 output_dir = config.effective_output_dir
+                print(
+                    f"\nExtracting {len(result.libraries)} libraries to {output_dir}...",
+                    file=sys.stderr,
+                )
                 extractions = hunter.extract(result, output_dir=output_dir)
                 if extractions:
                     print(formatter.format_extractions(extractions))

@@ -38,6 +38,9 @@ setup(
     packages=find_packages(exclude=("tests",)),
     python_requires=">=3.8",
     install_requires=install_requires,
+    extras_require={
+        "macos": ["dyldextractor"],
+    },
     # Include non-Python assets inside the package
     package_data={
         "tlslibhunter": [

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-# TLS keylog string patterns scanned in memory
-# From scanner.js + findSSLLibsOnWindows.py
-TLS_STRING_PATTERNS: list[str] = [
+import re
+
+# TLS keylog format strings (SSLKEYLOGFILE / NSS key log)
+_TLS_KEYLOG_PATTERNS: list[str] = [
     "CLIENT_RANDOM",
     "SERVER_HANDSHAKE_TRAFFIC_SECRET",
     "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
@@ -14,9 +15,32 @@ TLS_STRING_PATTERNS: list[str] = [
     "EARLY_EXPORTER_SECRET",
     "CLIENT_EARLY_TRAFFIC_SECRET",
     "SSLKEYLOGFILE",
-    "c hs traffic",
-    "master secret",
 ]
+
+# RFC 8446 TLS 1.3 HKDF-Expand-Label values
+TLS13_HKDF_LABELS: list[str] = [
+    "c hs traffic",
+    "s hs traffic",
+    "c ap traffic",
+    "s ap traffic",
+    "exp master",
+    "res master",
+    "c e traffic",
+    "e exp master",
+]
+
+# RFC 5246 TLS 1.2 PRF labels
+TLS12_PRF_LABELS: list[str] = [
+    "key expansion",
+    "master secret",
+    "extended master secret",
+]
+
+# Combined: all RFC TLS derivation labels (for raw label scan mode)
+TLS_DERIVATION_LABELS: list[str] = TLS13_HKDF_LABELS + TLS12_PRF_LABELS
+
+# All TLS string patterns scanned in memory (keylog + derivation labels)
+TLS_STRING_PATTERNS: list[str] = _TLS_KEYLOG_PATTERNS + TLS_DERIVATION_LABELS
 
 # Known TLS library export symbols for library type detection
 TLS_EXPORT_SYMBOLS: dict[str, str] = {
@@ -71,11 +95,10 @@ TLS_EXPORT_SYMBOLS: dict[str, str] = {
     "rustls_client_config_builder_new": "rustls",
 }
 
-# Known TLS library file name patterns -> library type
-KNOWN_TLS_LIBRARIES: dict[str, str] = {
-    # OpenSSL
+# Known TLS library stems -> library type (matched by exact stem after stripping extensions/versions)
+KNOWN_TLS_LIBRARY_STEMS: dict[str, str] = {
+    # OpenSSL (libssl only - libcrypto is crypto primitives, not TLS protocol)
     "libssl": "openssl",
-    "libcrypto": "openssl",
     "ssleay32": "openssl",
     "libeay32": "openssl",
     # BoringSSL
@@ -85,25 +108,23 @@ KNOWN_TLS_LIBRARIES: dict[str, str] = {
     "libconscrypt_jni": "boringssl",
     # Cronet (Chromium network stack, uses BoringSSL)
     "cronet": "boringssl",
+    "libcronet": "boringssl",
     # GnuTLS
     "libgnutls": "gnutls",
     # wolfSSL
     "libwolfssl": "wolfssl",
-    # mbedTLS
+    # mbedTLS (only the TLS library, not crypto/x509 support libs)
     "libmbedtls": "mbedtls",
-    "libmbedcrypto": "mbedtls",
-    "libmbedx509": "mbedtls",
     # NSS
     "libnss3": "nss",
     "nss3": "nss",
-    # SChannel
+    # SChannel (Windows only)
     "schannel": "schannel",
     "ncrypt": "schannel",
-    # Apple SecureTransport / Network.framework
-    "Security": "securetransport",
-    "Network": "securetransport",
     # LibreSSL
     "libressl": "libressl",
+    # Apple CoreTLS (internal TLS implementation)
+    "libcoretls": "securetransport",
     # BearSSL
     "libbearssl": "bearssl",
     # s2n-tls
@@ -120,6 +141,62 @@ KNOWN_TLS_LIBRARIES: dict[str, str] = {
     "libaws_lc": "aws-lc",
     "aws-lc": "aws-lc",
 }
+
+# Known TLS framework names -> library type (matched by exact name, no substring)
+KNOWN_TLS_LIBRARY_EXACT: dict[str, str] = {
+    # Apple SecureTransport / Network.framework
+    "security": "securetransport",
+    "network": "securetransport",
+    "cfnetwork": "securetransport",
+}
+
+# Pre-compute lowered stem lookups for O(1) matching
+_STEM_LOOKUP: dict[str, str] = {k.lower(): v for k, v in KNOWN_TLS_LIBRARY_STEMS.items()}
+_EXACT_LOOKUP: dict[str, str] = {k.lower(): v for k, v in KNOWN_TLS_LIBRARY_EXACT.items()}
+
+_VERSION_SUFFIX_RE = re.compile(r"(\.\d+)+$")
+_SO_EXT_RE = re.compile(r"\.so(\.\d+)*$")
+
+
+def _extract_stem(filename: str) -> str:
+    """Extract library stem: strip extension(s) and version numbers.
+
+    Examples:
+        'libssl.48.dylib' -> 'libssl'
+        'libssl.so.3' -> 'libssl'
+        'libgnutls.so.30' -> 'libgnutls'
+        'nss3.dll' -> 'nss3'
+        'libcronet.132.0.6779.0.so' -> 'libcronet'
+        'Security' -> 'security'
+    """
+    name = filename.lower()
+    # Strip trailing extension
+    for ext in (".dylib", ".dll", ".framework"):
+        if name.endswith(ext):
+            name = name[: -len(ext)]
+            break
+    # Handle .so with optional version suffix (libssl.so, libssl.so.3, libgnutls.so.30)
+    so_match = _SO_EXT_RE.search(name)
+    if so_match:
+        name = name[: so_match.start()]
+    # Strip trailing version numbers (e.g., .48, .3, .132.0.6779.0)
+    name = _VERSION_SUFFIX_RE.sub("", name)
+    return name
+
+
+def _match_known_library(name: str) -> str | None:
+    """Match a module name against known TLS library filename patterns.
+
+    Uses exact stem matching (no substring matching) to avoid false positives.
+
+    Args:
+        name: Library filename (e.g., "libboringssl.dylib")
+
+    Returns:
+        Library type string if matched, None otherwise.
+    """
+    stem = _extract_stem(name)
+    return _EXACT_LOOKUP.get(stem) or _STEM_LOOKUP.get(stem)
 
 
 def identify_library_type(
@@ -140,12 +217,10 @@ def identify_library_type(
     Returns:
         Library type string (openssl, boringssl, gnutls, etc.) or "unknown"
     """
-    name_lower = name.lower()
-
     # Check filename patterns (highest priority)
-    for pattern, lib_type in KNOWN_TLS_LIBRARIES.items():
-        if pattern.lower() in name_lower:
-            return lib_type
+    lib_type = _match_known_library(name)
+    if lib_type is not None:
+        return lib_type
 
     # Check fingerprint result (from string-based identification)
     if fingerprint_type and fingerprint_type != "unknown":
@@ -156,9 +231,21 @@ def identify_library_type(
         type_votes: dict[str, int] = {}
         for export in matched_exports:
             if export in TLS_EXPORT_SYMBOLS:
-                lib_type = TLS_EXPORT_SYMBOLS[export]
-                type_votes[lib_type] = type_votes.get(lib_type, 0) + 1
+                etype = TLS_EXPORT_SYMBOLS[export]
+                type_votes[etype] = type_votes.get(etype, 0) + 1
         if type_votes:
             return max(type_votes, key=type_votes.get)
 
     return "unknown"
+
+
+def is_known_tls_library(name: str) -> bool:
+    """Check if a module name matches a known TLS library filename pattern.
+
+    Args:
+        name: Library filename (e.g., "libboringssl.dylib")
+
+    Returns:
+        True if the name contains a known TLS library pattern.
+    """
+    return _match_known_library(name) is not None

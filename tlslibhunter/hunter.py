@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from tlslibhunter.config import HunterConfig
@@ -49,6 +50,7 @@ class TLSLibHunter:
         backend: str = "frida",
         timeout: int = 10,
         verbose: bool = False,
+        scan_mode: str = "standard",
     ):
         self._config = HunterConfig(
             target=target,
@@ -58,6 +60,7 @@ class TLSLibHunter:
             backend=backend,
             timeout=timeout,
             verbose=verbose,
+            scan_mode=scan_mode,
         )
         self._backend: Backend | None = None
         self._device = None
@@ -154,6 +157,11 @@ class TLSLibHunter:
             platform=self._platform,
             package_name=package_name,
             verbose=self._config.verbose,
+            scan_mode=self._config.scan_mode,
+            scan_split_constants=self._config.scan_split_constants,
+            scan_stack_strings=self._config.scan_stack_strings,
+            scan_rwx_regions=self._config.scan_rwx_regions,
+            scan_encoded_strings=self._config.scan_encoded_strings,
         )
 
         try:
@@ -191,8 +199,18 @@ class TLSLibHunter:
             output_dir=output_dir,
         )
 
+        # Reorder: extract disk-copyable libraries first (instant), then
+        # DSC/memory libraries (the first DSC extraction triggers full cache
+        # build; subsequent ones are cache hits).
+        libs = scan_result.libraries
+        disk_libs = [lib for lib in libs if lib.path and os.path.isfile(lib.path)]
+        other_libs = [lib for lib in libs if not lib.path or not os.path.isfile(lib.path)]
+        ordered_libs = disk_libs + other_libs
+
         results = []
-        for lib in scan_result.libraries:
+        total = len(ordered_libs)
+        for i, lib in enumerate(ordered_libs, 1):
+            logger.info("Extracting [%d/%d] %s...", i, total, lib.name)
             result = strategy.extract(lib)
             results.append(result)
 

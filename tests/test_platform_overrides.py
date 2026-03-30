@@ -12,10 +12,10 @@ class TestAndroidPlatformOverrides:
         info = self.clf.classify_module("libssl.so", "/system/lib64/libssl.so")
         assert info["library_type"] == "boringssl"
 
-    def test_system_libcrypto_is_boringssl(self):
-        """Android system libcrypto should be identified as BoringSSL."""
+    def test_system_libcrypto_not_tls(self):
+        """Android system libcrypto is crypto primitives, not a TLS library."""
         info = self.clf.classify_module("libcrypto.so", "/system/lib64/libcrypto.so")
-        assert info["library_type"] == "boringssl"
+        assert info["library_type"] == "unknown"
 
     def test_vendor_libssl_is_boringssl(self):
         """Android vendor libssl should be identified as BoringSSL."""
@@ -45,10 +45,10 @@ class TestMacOSPlatformOverrides:
     def setup_method(self):
         self.clf = ModuleClassifier("macos")
 
-    def test_system_libcrypto_is_libressl(self):
-        """macOS system libcrypto should be identified as LibreSSL."""
+    def test_system_libcrypto_not_tls(self):
+        """macOS system libcrypto is crypto primitives, not a TLS library."""
         info = self.clf.classify_module("libcrypto.44.dylib", "/usr/lib/libcrypto.44.dylib")
-        assert info["library_type"] == "libressl"
+        assert info["library_type"] == "unknown"
 
     def test_system_libssl_is_libressl(self):
         """macOS system libssl should be identified as LibreSSL."""
@@ -109,3 +109,13 @@ class TestNonOpenSSLNotOverridden:
         clf = ModuleClassifier("windows")
         info = clf.classify_module("nss3.dll", "C:\\Windows\\System32\\nss3.dll")
         assert info["library_type"] == "nss"
+
+
+class TestCoretlsOverride:
+    def test_coretls_classified_as_securetransport(self):
+        classifier = ModuleClassifier("macos")
+        info = classifier.classify_module(
+            "libcoretls.dylib", "/usr/lib/libcoretls.dylib",
+            matched_exports=[], fingerprint_type="boringssl",
+        )
+        assert info["library_type"] == "securetransport"

@@ -58,7 +58,7 @@ def _build_hex_pattern_map(strings: list[str]) -> tuple[list[str], dict[str, tup
         Tuple of (hex_patterns, hex_to_label_map) where hex_to_label_map maps
         each hex pattern to (original_label, encoding_type).
     """
-    from tlslibhunter.utils.encoding import ascii_to_hex, utf16le_to_hex, reversed_chunks_to_hex
+    from tlslibhunter.utils.encoding import ascii_to_hex, reversed_chunks_to_hex, utf16le_to_hex
 
     hex_to_label: dict[str, tuple[str, str]] = {}
     seen = set()
@@ -103,35 +103,43 @@ def _build_fingerprint_hex_patterns() -> tuple[list[str], dict[str, str]]:
 def _build_split_constant_pairs(strings: list[str]) -> list[dict]:
     """Build split constant pairs for JS-side proximity scanning."""
     from tlslibhunter.utils.encoding import split_constants_to_hex
+
     pairs = []
     for s in strings:
         for left_hex, right_hex, left_str, right_str in split_constants_to_hex(s):
-            pairs.append({
-                "leftHex": left_hex,
-                "rightHex": right_hex,
-                "leftStr": left_str,
-                "rightStr": right_str,
-            })
+            pairs.append(
+                {
+                    "leftHex": left_hex,
+                    "rightHex": right_hex,
+                    "leftStr": left_str,
+                    "rightStr": right_str,
+                }
+            )
     return pairs
 
 
 def _build_encoded_patterns(strings: list[str]) -> tuple[list[dict], dict]:
     """Build XOR and base64 encoded patterns for scanning."""
-    from tlslibhunter.utils.encoding import build_xor_patterns, base64_encode_to_hex
+    from tlslibhunter.utils.encoding import base64_encode_to_hex, build_xor_patterns
+
     patterns = []
     for s in strings:
         for hex_pat, key in build_xor_patterns(s):
-            patterns.append({
-                "hexPattern": hex_pat,
-                "encodingType": "xor",
-                "detail": f"{s} XOR 0x{key:02x}",
-            })
+            patterns.append(
+                {
+                    "hexPattern": hex_pat,
+                    "encodingType": "xor",
+                    "detail": f"{s} XOR 0x{key:02x}",
+                }
+            )
         b64_hex = base64_encode_to_hex(s)
-        patterns.append({
-            "hexPattern": b64_hex,
-            "encodingType": "base64",
-            "detail": f"{s} base64",
-        })
+        patterns.append(
+            {
+                "hexPattern": b64_hex,
+                "encodingType": "base64",
+                "detail": f"{s} base64",
+            }
+        )
     return patterns
 
 
@@ -146,7 +154,7 @@ def _add_extended_scan_hits(
     reason: str,
 ) -> None:
     """Append extended scan hits to an existing library entry, or create a new one."""
-    existing = next((l for l in result.libraries if l.name == name), None)
+    existing = next((lib for lib in result.libraries if lib.name == name), None)
     if existing:
         existing.extended_scan_hits.extend(hits)
         if reason not in existing.detection_reason:
@@ -154,11 +162,16 @@ def _add_extended_scan_hits(
     else:
         info = classifier.classify_module(name, path)
         lib = DetectedLibrary(
-            name=name, path=path, base_address=base, size=size,
+            name=name,
+            path=path,
+            base_address=base,
+            size=size,
             library_type=info["library_type"],
             classification=info["classification"],
-            matched_patterns=[], matched_exports=[],
-            matched_fingerprints=[], detected_version="",
+            matched_patterns=[],
+            matched_exports=[],
+            matched_fingerprints=[],
+            detected_version="",
             detection_reason=reason,
             extended_scan_hits=hits,
         )
@@ -166,9 +179,9 @@ def _add_extended_scan_hits(
 
 
 _PROBE_LABELS: list[str] = [
-    "master secret",   # TLS 1.2 — present in virtually all implementations
-    "c hs traffic",    # TLS 1.3 — handshake traffic secret label
-    "key expansion",   # TLS 1.2 — key derivation label
+    "master secret",  # TLS 1.2 — present in virtually all implementations
+    "c hs traffic",  # TLS 1.3 — handshake traffic secret label
+    "key expansion",  # TLS 1.2 — key derivation label
 ]
 """Minimal set of TLS derivation labels for the quick probe stage.
 
@@ -184,14 +197,15 @@ def _build_probe_patterns() -> list[str]:
     labels) in ASCII encoding. Much cheaper than the full 300+ pattern set.
     """
     from tlslibhunter.utils.encoding import ascii_to_hex
+
     return [ascii_to_hex(label) for label in _PROBE_LABELS]
 
 
 # Scan thresholds — tuning knobs for detection sensitivity vs speed
-_TLS_EARLY_EXIT_THRESHOLD = 5    # Stop TLS pattern scan after this many hits
-_FP_EARLY_EXIT_THRESHOLD = 5     # Stop fingerprint scan after this many hits
-_MIN_PATTERN_HITS = 3            # Pattern-only detections need >= N hits without exports/known name
-_MIN_TLS_MODULE_SIZE = 10 * 1024 # Modules smaller than 10 KB cannot contain a TLS implementation
+_TLS_EARLY_EXIT_THRESHOLD = 5  # Stop TLS pattern scan after this many hits
+_FP_EARLY_EXIT_THRESHOLD = 5  # Stop fingerprint scan after this many hits
+_MIN_PATTERN_HITS = 3  # Pattern-only detections need >= N hits without exports/known name
+_MIN_TLS_MODULE_SIZE = 10 * 1024  # Modules smaller than 10 KB cannot contain a TLS implementation
 
 
 class ModuleScanner:
@@ -245,12 +259,18 @@ class ModuleScanner:
         return unique
 
     def _scan_labels_mode(
-        self, modules: list[dict], result: ScanResult, start_time: float,
+        self,
+        modules: list[dict],
+        result: ScanResult,
+        start_time: float,
     ) -> ScanResult:
         """Execute labels scan mode (--scan-labels flag)."""
         hex_patterns, hex_to_label = _build_hex_pattern_map(TLS_DERIVATION_LABELS)
-        logger.info("Label scan mode: built %d patterns from %d TLS derivation labels",
-                    len(hex_patterns), len(TLS_DERIVATION_LABELS))
+        logger.info(
+            "Label scan mode: built %d patterns from %d TLS derivation labels",
+            len(hex_patterns),
+            len(TLS_DERIVATION_LABELS),
+        )
 
         scanned = 0
         for mod in modules:
@@ -272,19 +292,26 @@ class ModuleScanner:
                         desc = f"{label} ({enc_type})"
                         matched_descriptions.append(desc)
                         logger.info(
-                            "  Label hit in %s: \"%s\" [%s] at %s",
-                            name, label, enc_type, m.get("address", "?"),
+                            '  Label hit in %s: "%s" [%s] at %s',
+                            name,
+                            label,
+                            enc_type,
+                            m.get("address", "?"),
                         )
-                    logger.info("Label match in %s: %d hits: %s",
-                               name, len(matches), ", ".join(matched_descriptions))
+                    logger.info("Label match in %s: %d hits: %s", name, len(matches), ", ".join(matched_descriptions))
                     info = self._classifier.classify_module(name, path)
                     lib = DetectedLibrary(
-                        name=name, path=path, base_address=base, size=size,
+                        name=name,
+                        path=path,
+                        base_address=base,
+                        size=size,
                         library_type=info["library_type"],
                         classification=info["classification"],
                         matched_patterns=matched_descriptions,
-                        matched_exports=[], matched_fingerprints=[],
-                        detected_version="", detection_reason="label_scan",
+                        matched_exports=[],
+                        matched_fingerprints=[],
+                        detected_version="",
+                        detection_reason="label_scan",
                     )
                     result.libraries.append(lib)
             except Exception as e:
@@ -292,8 +319,12 @@ class ModuleScanner:
 
         result.total_modules_scanned = scanned
         result.scan_duration_seconds = time.time() - start_time
-        logger.info("Scan complete: %d TLS libraries found in %d modules (%.2fs)",
-                    len(result.libraries), scanned, result.scan_duration_seconds)
+        logger.info(
+            "Scan complete: %d TLS libraries found in %d modules (%.2fs)",
+            len(result.libraries),
+            scanned,
+            result.scan_duration_seconds,
+        )
         return result
 
     def _build_per_module_opts(
@@ -335,14 +366,14 @@ class ModuleScanner:
             logger.info("Pattern match in %s: %d hits", name, len(tls_matches))
 
         # Require stronger evidence for pattern-only detections
-        if matched_patterns and not matched_exports and not is_known:
-            if len(matched_patterns) < _MIN_PATTERN_HITS:
-                logger.debug(
-                    "Skipping %s: only %d pattern hit(s), need %d "
-                    "(no exports or known name to corroborate)",
-                    name, len(matched_patterns), _MIN_PATTERN_HITS,
-                )
-                return
+        if matched_patterns and not matched_exports and not is_known and len(matched_patterns) < _MIN_PATTERN_HITS:
+            logger.debug(
+                "Skipping %s: only %d pattern hit(s), need %d (no exports or known name to corroborate)",
+                name,
+                len(matched_patterns),
+                _MIN_PATTERN_HITS,
+            )
+            return
 
         if matched_patterns or matched_exports or is_known:
             fingerprint_type = "unknown"
@@ -355,7 +386,11 @@ class ModuleScanner:
                 fingerprint_type, detected_version = fingerprint_library(matched_fingerprints)
 
             info = self._classifier.classify_module(
-                name, path, matched_exports, fingerprint_type, detected_version,
+                name,
+                path,
+                matched_exports,
+                fingerprint_type,
+                detected_version,
             )
 
             # Log fingerprint with clarity about overrides
@@ -363,12 +398,15 @@ class ModuleScanner:
                 if info["library_type"] != fingerprint_type:
                     logger.info(
                         "Fingerprint: %s contains %s code (classified as %s by name)",
-                        name, fingerprint_type, info["library_type"],
+                        name,
+                        fingerprint_type,
+                        info["library_type"],
                     )
                 else:
                     logger.info(
                         "Fingerprint: %s identified as %s%s",
-                        name, fingerprint_type,
+                        name,
+                        fingerprint_type,
                         f" v{detected_version}" if detected_version else "",
                     )
 
@@ -380,7 +418,10 @@ class ModuleScanner:
             if is_known:
                 reasons.append("known_name")
             lib = DetectedLibrary(
-                name=name, path=path, base_address=base, size=size,
+                name=name,
+                path=path,
+                base_address=base,
+                size=size,
                 library_type=info["library_type"],
                 classification=info["classification"],
                 matched_patterns=matched_patterns,
@@ -396,26 +437,36 @@ class ModuleScanner:
         split_matches = combined.get("splitMatches", [])
         if split_matches:
             for sm in split_matches:
-                logger.info("Split constant in %s: %s + %s (distance: %s)",
-                           name, sm.get("leftStr"), sm.get("rightStr"), sm.get("distance"))
-            hits = [{
-                "scan_type": "split_constant",
-                "detail": f"{sm.get('leftStr', '')} + {sm.get('rightStr', '')}",
-                "distance": sm.get("distance", ""),
-            } for sm in split_matches]
+                logger.info(
+                    "Split constant in %s: %s + %s (distance: %s)",
+                    name,
+                    sm.get("leftStr"),
+                    sm.get("rightStr"),
+                    sm.get("distance"),
+                )
+            hits = [
+                {
+                    "scan_type": "split_constant",
+                    "detail": f"{sm.get('leftStr', '')} + {sm.get('rightStr', '')}",
+                    "distance": sm.get("distance", ""),
+                }
+                for sm in split_matches
+            ]
             _add_extended_scan_hits(result, self._classifier, name, path, base, size, hits, "split_constant")
 
         # Encoded strings
         enc_matches = combined.get("encodedMatches", [])
         if enc_matches:
             for em in enc_matches:
-                logger.info("Encoded string in %s: %s [%s]",
-                           name, em.get("detail"), em.get("encodingType"))
-            hits = [{
-                "scan_type": em.get("encodingType", "encoded"),
-                "detail": em.get("detail", ""),
-                "address": em.get("address", ""),
-            } for em in enc_matches]
+                logger.info("Encoded string in %s: %s [%s]", name, em.get("detail"), em.get("encodingType"))
+            hits = [
+                {
+                    "scan_type": em.get("encodingType", "encoded"),
+                    "detail": em.get("detail", ""),
+                    "address": em.get("address", ""),
+                }
+                for em in enc_matches
+            ]
             _add_extended_scan_hits(result, self._classifier, name, path, base, size, hits, "encoded_string")
 
     def scan(self, target_name: str) -> ScanResult:
@@ -467,7 +518,8 @@ class ModuleScanner:
 
         logger.info(
             "After name/path filtering: %d candidates (%d skipped)",
-            len(stage1_candidates), deduped_count - len(stage1_candidates),
+            len(stage1_candidates),
+            deduped_count - len(stage1_candidates),
         )
 
         # Track pipeline metadata separately — don't mutate Frida module dicts
@@ -517,17 +569,15 @@ class ModuleScanner:
         confirmed_so_far = known_modules + export_confirmed
         logger.info(
             "After export check: %d confirmed, %d remaining",
-            len(confirmed_so_far), len(no_exports),
+            len(confirmed_so_far),
+            len(no_exports),
         )
 
         # ============================================================
         # STAGE 3: Quick TLS probe (single RPC call, lightweight)
         # ============================================================
         # Pre-filter: skip tiny modules that cannot contain a TLS implementation
-        no_exports = [
-            m for m in no_exports
-            if int(m.get("size", 0) or 0) >= _MIN_TLS_MODULE_SIZE
-        ]
+        no_exports = [m for m in no_exports if int(m.get("size", 0) or 0) >= _MIN_TLS_MODULE_SIZE]
         probe_confirmed = []
         if no_exports:
             probe_patterns = _build_probe_patterns()
@@ -590,14 +640,17 @@ class ModuleScanner:
             name = mod.get("name", "")
             is_known, matched_exports = module_meta.get(name, (False, []))
             per_mod_opts = self._build_per_module_opts(
-                is_known, matched_exports, hex_patterns,
+                is_known,
+                matched_exports,
+                hex_patterns,
             )
             module_configs.append({"name": name, "opts": per_mod_opts})
 
         batch_results: dict = {}
         try:
             batch_results = self._exports.batch_scan_modules_combined(
-                module_configs, base_scan_opts,
+                module_configs,
+                base_scan_opts,
             )
         except Exception as e:
             logger.debug("Batch scan error: %s, falling back to sequential scan", e)
@@ -607,7 +660,8 @@ class ModuleScanner:
                 merged.update(cfg["opts"])
                 try:
                     batch_results[cfg["name"]] = self._exports.scan_module_combined(
-                        cfg["name"], merged,
+                        cfg["name"],
+                        merged,
                     )
                 except Exception as e2:
                     logger.debug("Combined scan error for %s: %s", cfg["name"], e2)
@@ -617,8 +671,12 @@ class ModuleScanner:
             is_known, matched_exports = module_meta.get(name, (False, []))
             combined = batch_results.get(name, {})
             self._process_scan_result(
-                mod, is_known, matched_exports,
-                combined, fp_hex_to_string, result,
+                mod,
+                is_known,
+                matched_exports,
+                combined,
+                fp_hex_to_string,
+                result,
             )
 
         # Pipeline stats
@@ -636,7 +694,9 @@ class ModuleScanner:
 
         logger.info(
             "Scan complete: %d TLS libraries found in %d modules (%.2fs)",
-            len(result.libraries), len(all_confirmed), result.scan_duration_seconds,
+            len(result.libraries),
+            len(all_confirmed),
+            result.scan_duration_seconds,
         )
 
         # RWX region scan
@@ -646,16 +706,25 @@ class ModuleScanner:
                 if rwx_matches:
                     logger.info("Found %d pattern(s) in RWX regions", len(rwx_matches))
                     lib = DetectedLibrary(
-                        name="[JIT/RWX]", path="", base_address="", size=0,
-                        library_type="unknown", classification="unknown",
+                        name="[JIT/RWX]",
+                        path="",
+                        base_address="",
+                        size=0,
+                        library_type="unknown",
+                        classification="unknown",
                         matched_patterns=[m.get("pattern", "") for m in rwx_matches],
-                        matched_exports=[], matched_fingerprints=[],
-                        detected_version="", detection_reason="rwx_scan",
-                        extended_scan_hits=[{
-                            "scan_type": "rwx_region",
-                            "detail": f"pattern at {m.get('address', '?')}",
-                            "protection": m.get("protection", ""),
-                        } for m in rwx_matches],
+                        matched_exports=[],
+                        matched_fingerprints=[],
+                        detected_version="",
+                        detection_reason="rwx_scan",
+                        extended_scan_hits=[
+                            {
+                                "scan_type": "rwx_region",
+                                "detail": f"pattern at {m.get('address', '?')}",
+                                "protection": m.get("protection", ""),
+                            }
+                            for m in rwx_matches
+                        ],
                     )
                     result.libraries.append(lib)
             except Exception as e:
@@ -668,16 +737,25 @@ class ModuleScanner:
                 if stack_matches:
                     logger.info("Found %d pattern(s) in stack/writable memory", len(stack_matches))
                     lib = DetectedLibrary(
-                        name="[stack/heap]", path="", base_address="", size=0,
-                        library_type="unknown", classification="unknown",
+                        name="[stack/heap]",
+                        path="",
+                        base_address="",
+                        size=0,
+                        library_type="unknown",
+                        classification="unknown",
                         matched_patterns=[m.get("pattern", "") for m in stack_matches],
-                        matched_exports=[], matched_fingerprints=[],
-                        detected_version="", detection_reason="stack_string",
-                        extended_scan_hits=[{
-                            "scan_type": "stack_string",
-                            "detail": f"pattern at {m.get('address', '?')}",
-                            "protection": m.get("protection", ""),
-                        } for m in stack_matches],
+                        matched_exports=[],
+                        matched_fingerprints=[],
+                        detected_version="",
+                        detection_reason="stack_string",
+                        extended_scan_hits=[
+                            {
+                                "scan_type": "stack_string",
+                                "detail": f"pattern at {m.get('address', '?')}",
+                                "protection": m.get("protection", ""),
+                            }
+                            for m in stack_matches
+                        ],
                     )
                     result.libraries.append(lib)
             except Exception as e:

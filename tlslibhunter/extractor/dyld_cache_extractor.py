@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-import platform as platform_mod
 import pathlib
+import platform as platform_mod
 from typing import Any
 
 from tlslibhunter.extractor.base import Extractor
@@ -23,10 +23,7 @@ def _find_dyld_cache() -> str | None:
     """Locate the dyld shared cache file for the current architecture."""
     arch = platform_mod.machine()
     # Try architecture suffixes in order of likelihood
-    if arch == "arm64":
-        suffixes = ["arm64e"]
-    else:
-        suffixes = ["x86_64h", "x86_64"]
+    suffixes = ["arm64e"] if arch == "arm64" else ["x86_64h", "x86_64"]
 
     # Cache paths in order: Ventura+ (macOS 13+), then Big Sur/Monterey
     base_dirs = [
@@ -46,6 +43,7 @@ def _has_dyldextractor() -> bool:
     """Check if the dyldextractor package is available."""
     try:
         from DyldExtractor.dyld.dyld_context import DyldContext  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -69,9 +67,7 @@ class DyldCacheExtractor(Extractor):
             return False
 
         # Only for system libraries (not on disk)
-        if not library.path or not any(
-            library.path.startswith(p) for p in _SYSTEM_PREFIXES
-        ):
+        if not library.path or not any(library.path.startswith(p) for p in _SYSTEM_PREFIXES):
             return False
 
         # File must NOT exist on disk (i.e., it's in the dyld cache)
@@ -100,30 +96,24 @@ class DyldCacheExtractor(Extractor):
         try:
             return self._extract_from_cache(library, output_path)
         except PermissionError:
-            msg = f"Permission denied reading dyld cache (try with sudo)"
+            msg = "Permission denied reading dyld cache (try with sudo)"
             logger.warning(msg)
-            return ExtractionResult(
-                library=library, success=False, method=self.method_name, error=msg
-            )
+            return ExtractionResult(library=library, success=False, method=self.method_name, error=msg)
         except Exception as e:
             msg = f"Dyld cache extraction failed: {e}"
             logger.warning(msg)
-            return ExtractionResult(
-                library=library, success=False, method=self.method_name, error=msg
-            )
+            return ExtractionResult(library=library, success=False, method=self.method_name, error=msg)
 
-    def _extract_from_cache(
-        self, library: DetectedLibrary, output_path: str
-    ) -> ExtractionResult:
-        from DyldExtractor.dyld.dyld_context import DyldContext
-        from DyldExtractor.macho.macho_context import MachOContext
-        from DyldExtractor.extraction_context import ExtractionContext
+    def _extract_from_cache(self, library: DetectedLibrary, output_path: str) -> ExtractionResult:
         from DyldExtractor.converter import (
-            slide_info,
-            macho_offset,
             linkedit_optimizer,
+            macho_offset,
+            slide_info,
             stub_fixer,
         )
+        from DyldExtractor.dyld.dyld_context import DyldContext
+        from DyldExtractor.extraction_context import ExtractionContext
+        from DyldExtractor.macho.macho_context import MachOContext
 
         cache_path = _find_dyld_cache()
         if not cache_path:
@@ -177,9 +167,7 @@ class DyldCacheExtractor(Extractor):
                 # Wire up subcache mappings
                 if dyld_ctx.hasSubCaches():
                     mappings = dyld_ctx.mappings
-                    main_file_map = next(
-                        m[0] for m in mappings if m[1] == context
-                    )
+                    main_file_map = next(m[0] for m in mappings if m[1] == context)
                     macho_ctx.addSubfiles(
                         main_file_map,
                         ((m, ctx.makeCopy(copyMode=True)) for m, ctx in mappings),
@@ -187,9 +175,7 @@ class DyldCacheExtractor(Extractor):
 
                 # Create a minimal progress bar stub (dyldextractor requires one)
                 status_bar = _NullProgressBar()
-                extraction_ctx = ExtractionContext(
-                    dyld_ctx, macho_ctx, status_bar, logger
-                )
+                extraction_ctx = ExtractionContext(dyld_ctx, macho_ctx, status_bar, logger)
 
                 # Run converter pipeline (reverses SharedCacheBuilder optimizations)
                 slide_info.processSlideInfo(extraction_ctx)
@@ -199,6 +185,7 @@ class DyldCacheExtractor(Extractor):
                 # Try ObjC fixer (may fail on Python 3.13+ due to capstone/pkg_resources)
                 try:
                     from DyldExtractor.converter import objc_fixer
+
                     objc_fixer.fixObjC(extraction_ctx)
                 except Exception:
                     logger.debug("ObjC fixer unavailable, skipping (binary still usable)")
@@ -209,18 +196,14 @@ class DyldCacheExtractor(Extractor):
                 with open(output_path, "wb") as out_file:
                     for proc in write_procedures:
                         out_file.seek(proc.writeOffset)
-                        out_file.write(
-                            proc.fileCtx.getBytes(proc.readOffset, proc.size)
-                        )
+                        out_file.write(proc.fileCtx.getBytes(proc.readOffset, proc.size))
 
             finally:
                 for file in sub_cache_files:
                     file.close()
 
         size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-        logger.info(
-            "Dyld cache extract: %s -> %s (%d bytes)", library.name, output_path, size
-        )
+        logger.info("Dyld cache extract: %s -> %s (%d bytes)", library.name, output_path, size)
         return ExtractionResult(
             library=library,
             success=True,

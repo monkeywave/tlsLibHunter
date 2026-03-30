@@ -1,11 +1,11 @@
 """Tests for TLS indicator patterns and library type identification."""
 
 from tlslibhunter.scanner.tls_indicators import (
+    TLS12_PRF_LABELS,
+    TLS13_HKDF_LABELS,
+    TLS_DERIVATION_LABELS,
     TLS_EXPORT_SYMBOLS,
     TLS_STRING_PATTERNS,
-    TLS_DERIVATION_LABELS,
-    TLS13_HKDF_LABELS,
-    TLS12_PRF_LABELS,
     identify_library_type,
     is_known_tls_library,
 )

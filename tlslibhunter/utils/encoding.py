@@ -39,7 +39,7 @@ def reversed_chunks_to_hex(s: str, chunk_size: int = 8) -> list[str]:
     """
     patterns = []
     for i in range(0, len(s), chunk_size):
-        chunk = s[i:i + chunk_size]
+        chunk = s[i : i + chunk_size]
         if len(chunk) >= 6:
             reversed_chunk = chunk[::-1]
             patterns.append(ascii_to_hex(reversed_chunk))
@@ -102,7 +102,8 @@ def split_constant_pairs(s: str, min_length: int = 4) -> list[tuple[str, str]]:
 
 
 def split_constants_to_hex(
-    s: str, min_length: int = 4,
+    s: str,
+    min_length: int = 4,
 ) -> list[tuple[str, str, str, str]]:
     """Split string into pairs and convert each half to hex.
 
@@ -114,8 +115,7 @@ def split_constants_to_hex(
         List of (left_hex, right_hex, left_str, right_str) tuples
     """
     return [
-        (ascii_to_hex(left), ascii_to_hex(right), left, right)
-        for left, right in split_constant_pairs(s, min_length)
+        (ascii_to_hex(left), ascii_to_hex(right), left, right) for left, right in split_constant_pairs(s, min_length)
     ]
 
 
@@ -133,7 +133,8 @@ def xor_encode_to_hex(s: str, key: int) -> str:
 
 
 def build_xor_patterns(
-    target: str, keys: list[int] | None = None,
+    target: str,
+    keys: list[int] | None = None,
 ) -> list[tuple[str, int]]:
     """Build XOR-encoded hex patterns for a target string.
 
@@ -148,11 +149,7 @@ def build_xor_patterns(
     if keys is None:
         keys = [0x01, 0x20, 0x41, 0x55, 0x80, 0xAA, 0xCC, 0xF0, 0xFF]
 
-    return [
-        (xor_encode_to_hex(target, key), key)
-        for key in keys
-        if key != 0x00
-    ]
+    return [(xor_encode_to_hex(target, key), key) for key in keys if key != 0x00]
 
 
 def base64_encode_to_hex(s: str) -> str:
@@ -166,5 +163,3 @@ def base64_encode_to_hex(s: str) -> str:
     """
     b64 = base64.b64encode(s.encode("ascii")).decode("ascii")
     return ascii_to_hex(b64)
-
-

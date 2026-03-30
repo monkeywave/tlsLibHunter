@@ -1,12 +1,11 @@
 """Tests for the native dsc_extractor-based dyld cache extraction."""
 
 import json
-import os
 from unittest import mock
 
 import pytest
 
-from tlslibhunter.scanner.results import DetectedLibrary, ExtractionResult
+from tlslibhunter.scanner.results import DetectedLibrary
 
 
 @pytest.fixture
@@ -32,6 +31,7 @@ def app_library():
 @pytest.fixture
 def extractor():
     from tlslibhunter.extractor.native_dsc_extractor import NativeDscExtractor
+
     return NativeDscExtractor()
 
 
@@ -69,9 +69,7 @@ class TestCanExtract:
         "tlslibhunter.extractor.native_dsc_extractor._find_dyld_cache",
         return_value="/System/Library/dyld/dyld_shared_cache_arm64e",
     )
-    def test_accepts_system_library(
-        self, mock_cache, mock_load, mock_isfile, extractor, system_library
-    ):
+    def test_accepts_system_library(self, mock_cache, mock_load, mock_isfile, extractor, system_library):
         assert extractor.can_extract(system_library, "macos") is True
 
     def test_accepts_system_prefixes(self, extractor):
@@ -82,21 +80,20 @@ class TestCanExtract:
         ]
         for path in paths:
             lib = DetectedLibrary(name="test.dylib", path=path)
-            with mock.patch("os.path.isfile", return_value=False), \
-                 mock.patch(
-                     "tlslibhunter.extractor.native_dsc_extractor._load_dsc_extractor",
-                     return_value=mock.MagicMock(),
-                 ), \
-                 mock.patch(
-                     "tlslibhunter.extractor.native_dsc_extractor._find_dyld_cache",
-                     return_value="/some/cache",
-                 ):
+            with mock.patch("os.path.isfile", return_value=False), mock.patch(
+                "tlslibhunter.extractor.native_dsc_extractor._load_dsc_extractor",
+                return_value=mock.MagicMock(),
+            ), mock.patch(
+                "tlslibhunter.extractor.native_dsc_extractor._find_dyld_cache",
+                return_value="/some/cache",
+            ):
                 assert extractor.can_extract(lib, "macos") is True, f"Failed for {path}"
 
 
 class TestCacheValidation:
     def test_invalid_when_no_meta(self, tmp_path):
         from tlslibhunter.extractor.native_dsc_extractor import _is_cache_valid
+
         assert _is_cache_valid(str(tmp_path), "/some/path") is False
 
     def test_valid_when_mtime_matches(self, tmp_path):
@@ -104,6 +101,7 @@ class TestCacheValidation:
             _is_cache_valid,
             _write_cache_meta,
         )
+
         # Create a fake dyld cache file
         fake_cache = tmp_path / "dyld_cache"
         fake_cache.write_bytes(b"fake")
@@ -116,9 +114,10 @@ class TestCacheValidation:
 
     def test_invalid_when_mtime_differs(self, tmp_path):
         from tlslibhunter.extractor.native_dsc_extractor import (
-            _is_cache_valid,
             _META_FILE,
+            _is_cache_valid,
         )
+
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
 
@@ -159,6 +158,7 @@ class TestMethodName:
 class TestMacOSExtractionOrder:
     def test_dsc_native_before_dyld_cache(self):
         from tlslibhunter.platforms.macos import MacOSHandler
+
         handler = MacOSHandler()
         order = handler.get_extraction_order()
         assert "dsc_native" in order
@@ -167,6 +167,7 @@ class TestMacOSExtractionOrder:
 
     def test_disk_copy_first(self):
         from tlslibhunter.platforms.macos import MacOSHandler
+
         handler = MacOSHandler()
         order = handler.get_extraction_order()
         assert order[0] == "disk_copy"

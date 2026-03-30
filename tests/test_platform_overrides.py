@@ -115,7 +115,9 @@ class TestCoretlsOverride:
     def test_coretls_classified_as_securetransport(self):
         classifier = ModuleClassifier("macos")
         info = classifier.classify_module(
-            "libcoretls.dylib", "/usr/lib/libcoretls.dylib",
-            matched_exports=[], fingerprint_type="boringssl",
+            "libcoretls.dylib",
+            "/usr/lib/libcoretls.dylib",
+            matched_exports=[],
+            fingerprint_type="boringssl",
         )
         assert info["library_type"] == "securetransport"

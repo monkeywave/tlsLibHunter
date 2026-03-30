@@ -158,5 +158,3 @@ class TestBase64EncodeToHex:
         result = base64_encode_to_hex("SSL")
         expected = ascii_to_hex("U1NM")
         assert result == expected
-
-

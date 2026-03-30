@@ -17,31 +17,39 @@ logger = logging.getLogger("tlslibhunter.scanner.classifier")
 
 # macOS/iOS libraries that are NOT TLS implementations despite confusing names.
 # Defense-in-depth: also skips expensive pattern scanning for these modules.
-_MACOS_NON_TLS = frozenset({
-    "libcommoncrypto.dylib",
-    "securityhi",
-    "securityfoundation",
-    "securityinterface",
-    "libinterpretersecurity.dylib",
-    "libendpointsecuritysystem.dylib",
-    "messagesecurity",
-    "networkserviceproxy",
-    "libnetworkextension.dylib",
-    "libsystem_networkextension.dylib",
-    "networkextension",
-    "captivenetwork",
-    "libbnns.dylib",
-    "mpsneuralnetwork",
-    "locationlogencryption",
-    "launchservices",
-    "libsoftokn3.dylib",
-})
+_MACOS_NON_TLS = frozenset(
+    {
+        "libcommoncrypto.dylib",
+        "securityhi",
+        "securityfoundation",
+        "securityinterface",
+        "libinterpretersecurity.dylib",
+        "libendpointsecuritysystem.dylib",
+        "messagesecurity",
+        "networkserviceproxy",
+        "libnetworkextension.dylib",
+        "libsystem_networkextension.dylib",
+        "networkextension",
+        "captivenetwork",
+        "libbnns.dylib",
+        "mpsneuralnetwork",
+        "locationlogencryption",
+        "launchservices",
+        "libsoftokn3.dylib",
+    }
+)
 
 # Derive TLS candidate stems from the canonical lists in tls_indicators,
 # plus a few extra consumer libraries we want to scan on macOS.
-_MACOS_EXTRA_TLS_STEMS = frozenset({
-    "libcrypto", "libtls", "libnspr4", "libcurl", "libssh2",
-})
+_MACOS_EXTRA_TLS_STEMS = frozenset(
+    {
+        "libcrypto",
+        "libtls",
+        "libnspr4",
+        "libcurl",
+        "libssh2",
+    }
+)
 _MACOS_TLS_CANDIDATE_STEMS = (
     frozenset(KNOWN_TLS_LIBRARY_STEMS) | frozenset(KNOWN_TLS_LIBRARY_EXACT) | _MACOS_EXTRA_TLS_STEMS
 )
@@ -208,11 +216,7 @@ class ModuleClassifier:
                 return False
 
         # Skip known non-TLS macOS/iOS libraries with confusing names
-        if self.platform in ("macos", "ios"):
-            if name_lower in _MACOS_NON_TLS:
-                return False
-
-        return True
+        return not (self.platform in ("macos", "ios") and name_lower in _MACOS_NON_TLS)
 
     def is_tls_candidate(self, name: str, path: str) -> bool:
         """Stricter than is_scan_worthy — aggressively filters macOS system frameworks.
@@ -239,10 +243,11 @@ class ModuleClassifier:
             return True
 
         # Non-system paths always pass (app-bundled, homebrew, etc.)
-        if not path or not any(path.startswith(p) for p in SYSTEM_FRAMEWORK_PREFIXES):
-            if not path or not path.startswith("/usr/lib/"):
-                return True
-            # For /usr/lib/ libs, also apply the keyword/stem check below
+        if (not path or not any(path.startswith(p) for p in SYSTEM_FRAMEWORK_PREFIXES)) and (
+            not path or not path.startswith("/usr/lib/")
+        ):
+            return True
+        # For /usr/lib/ libs, also apply the keyword/stem check below
 
         # System framework path — only keep if name suggests TLS relevance
         name_lower = name.lower()
@@ -252,7 +257,4 @@ class ModuleClassifier:
             return True
 
         # Check if name or path contains TLS-related keywords
-        if any(kw in name_lower for kw in _TLS_PATH_KEYWORDS):
-            return True
-
-        return False
+        return any(kw in name_lower for kw in _TLS_PATH_KEYWORDS)

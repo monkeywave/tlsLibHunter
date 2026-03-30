@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import json
 import logging
@@ -10,7 +11,7 @@ import shutil
 from typing import Any
 
 from tlslibhunter.extractor.base import Extractor
-from tlslibhunter.extractor.dyld_cache_extractor import _find_dyld_cache, _SYSTEM_PREFIXES
+from tlslibhunter.extractor.dyld_cache_extractor import _SYSTEM_PREFIXES, _find_dyld_cache
 from tlslibhunter.scanner.results import DetectedLibrary, ExtractionResult
 
 logger = logging.getLogger("tlslibhunter.extractor.native_dsc")
@@ -36,10 +37,8 @@ def _load_dsc_extractor() -> ctypes.CDLL | None:
     _dsc_lib_checked = True
     if not os.path.exists(_DSC_BUNDLE_PATH):
         return None
-    try:
+    with contextlib.suppress(OSError):
         _cached_dsc_lib = ctypes.cdll.LoadLibrary(_DSC_BUNDLE_PATH)
-    except OSError:
-        pass
     return _cached_dsc_lib
 
 
@@ -49,7 +48,7 @@ def _is_cache_valid(cache_dir: str, dyld_cache_path: str) -> bool:
     if not os.path.exists(meta_path):
         return False
     try:
-        with open(meta_path, "r") as f:
+        with open(meta_path) as f:
             meta = json.load(f)
         cached_mtime = meta.get("dyld_cache_mtime", 0)
         current_mtime = os.path.getmtime(dyld_cache_path)
@@ -120,9 +119,7 @@ class NativeDscExtractor(Extractor):
         if platform not in ("macos",):
             return False
 
-        if not library.path or not any(
-            library.path.startswith(p) for p in _SYSTEM_PREFIXES
-        ):
+        if not library.path or not any(library.path.startswith(p) for p in _SYSTEM_PREFIXES):
             return False
 
         # Only for libraries not on disk (i.e., in the dyld cache)
@@ -146,19 +143,13 @@ class NativeDscExtractor(Extractor):
         except PermissionError:
             msg = "Permission denied reading dyld cache (try with sudo)"
             logger.warning(msg)
-            return ExtractionResult(
-                library=library, success=False, method=self.method_name, error=msg
-            )
+            return ExtractionResult(library=library, success=False, method=self.method_name, error=msg)
         except Exception as e:
             msg = f"Native dsc extraction failed: {e}"
             logger.warning(msg)
-            return ExtractionResult(
-                library=library, success=False, method=self.method_name, error=msg
-            )
+            return ExtractionResult(library=library, success=False, method=self.method_name, error=msg)
 
-    def _do_extract(
-        self, library: DetectedLibrary, output_path: str
-    ) -> ExtractionResult:
+    def _do_extract(self, library: DetectedLibrary, output_path: str) -> ExtractionResult:
         dyld_cache_path = _find_dyld_cache()
         if not dyld_cache_path:
             return ExtractionResult(
@@ -174,10 +165,7 @@ class NativeDscExtractor(Extractor):
         os.makedirs(cache_dir, exist_ok=True)
 
         if not _is_cache_valid(cache_dir, dyld_cache_path):
-            logger.info(
-                "Extracting dyld shared cache (first run or cache updated). "
-                "This may take 1-3 minutes..."
-            )
+            logger.info("Extracting dyld shared cache (first run or cache updated). This may take 1-3 minutes...")
             # Clear stale cache
             for entry in os.listdir(cache_dir):
                 entry_path = os.path.join(cache_dir, entry)

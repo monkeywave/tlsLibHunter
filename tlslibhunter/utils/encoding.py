@@ -21,6 +21,47 @@ def utf16le_to_hex(s: str) -> str:
     return " ".join(f"{ord(c):02x} 00" for c in s)
 
 
+def utf16be_to_hex(s: str) -> str:
+    """Convert string to UTF-16BE hex pattern (each char prefixed with 00).
+
+    Example: "SSL" -> "00 53 00 53 00 4c"
+    Used for big-endian platforms (PowerPC, some MIPS) and certain Windows
+    resource sections.
+    """
+    return " ".join(f"00 {ord(c):02x}" for c in s)
+
+
+def ascii_null_terminated_to_hex(s: str) -> str:
+    """Convert ASCII string to hex with trailing null byte.
+
+    Example: "SSL" -> "53 53 4c 00"
+    Matches C string literals stored inline (with their terminator).
+    """
+    return ascii_to_hex(s) + " 00"
+
+
+def utf16le_null_terminated_to_hex(s: str) -> str:
+    """Convert string to UTF-16LE hex with trailing 00 00 (wide-char null).
+
+    Example: "SSL" -> "53 00 53 00 4c 00 00 00"
+    """
+    return utf16le_to_hex(s) + " 00 00"
+
+
+def ascii_space_padded_to_hex(s: str, pad_to: int = 8) -> str:
+    """Convert ASCII string to hex padded with 0x20 to pad_to bytes.
+
+    Used to match the TLS 1.3 HKDF label style where short labels like
+    "tls13 " are stored in fixed-size buffers (TLSKeyHunter.java compatibility).
+
+    Example: "tls13 " (6 chars), pad_to=8 -> "74 6c 73 31 33 20 20 20"
+    """
+    if len(s) >= pad_to:
+        return ascii_to_hex(s)
+    padding = " ".join(["20"] * (pad_to - len(s)))
+    return ascii_to_hex(s) + " " + padding
+
+
 def reversed_chunks_to_hex(s: str, chunk_size: int = 8) -> list[str]:
     """Generate reversed chunk hex patterns for stack string detection.
 
@@ -35,37 +76,62 @@ def reversed_chunks_to_hex(s: str, chunk_size: int = 8) -> list[str]:
         chunk_size: Chunk size in bytes (default 8 for 64-bit immediates)
 
     Returns:
-        List of hex patterns for reversed chunks (only chunks >= 6 chars)
+        List of hex patterns for reversed chunks. The per-chunk minimum
+        length is 6 for the default chunk_size=8 (to avoid false positives);
+        chunk_size=4 lowers the floor to 4 chars per chunk.
     """
     patterns = []
+    min_chunk_len = max(4, min(chunk_size, 6))
     for i in range(0, len(s), chunk_size):
         chunk = s[i : i + chunk_size]
-        if len(chunk) >= 6:
+        if len(chunk) >= min_chunk_len:
             reversed_chunk = chunk[::-1]
             patterns.append(ascii_to_hex(reversed_chunk))
     return patterns
 
 
+def iter_encodings(target: str):
+    """Yield (hex_pattern, encoding_type) for every encoding variant of `target`.
+
+    Single source of truth for the encoding set so `build_scan_patterns`
+    (hex-only) and `_build_hex_pattern_map` (hex + reverse-lookup) stay
+    in sync. UTF-16BE is gated to strings >= 6 chars to avoid FPs.
+
+    Note: `ascii_space_padded_to_hex` is intentionally opt-in (call sites
+    request it explicitly because it can produce false positives), so it
+    is NOT yielded here.
+    """
+    yield ascii_to_hex(target), "ascii"
+    yield ascii_null_terminated_to_hex(target), "ascii_nt"
+    yield utf16le_to_hex(target), "utf16le"
+    yield utf16le_null_terminated_to_hex(target), "utf16le_nt"
+    if len(target) >= 6:
+        yield utf16be_to_hex(target), "utf16be"
+    for rev_hex in reversed_chunks_to_hex(target):
+        yield rev_hex, "reversed_chunk_8"
+    for rev_hex in reversed_chunks_to_hex(target, chunk_size=4):
+        yield rev_hex, "reversed_chunk_4"
+
+
 def build_scan_patterns(target: str) -> list[str]:
     """Build hex pattern variants for a TLS string to maximize detection.
 
-    Generates ASCII, UTF-16LE, and reversed chunk encodings.
-    - ASCII: standard string encoding
-    - UTF-16LE: common in Windows DLLs (wide chars)
-    - Reversed chunks: stack strings constructed via mov immediates
+    Generates ASCII, UTF-16LE (and their null-terminated variants), UTF-16BE
+    (for strings >= 6 chars to avoid FPs), and reversed 8-byte + 4-byte stack chunks.
 
     Args:
         target: The string to encode (e.g., "CLIENT_RANDOM")
 
     Returns:
-        List of hex pattern strings for Frida Memory.scanSync()
+        Deduplicated list of hex pattern strings for Frida Memory.scanSync()
     """
-    patterns = [
-        ascii_to_hex(target),
-        utf16le_to_hex(target),
-    ]
-    patterns.extend(reversed_chunks_to_hex(target))
-    return patterns
+    seen: set[str] = set()
+    out: list[str] = []
+    for hex_pat, _enc in iter_encodings(target):
+        if hex_pat and hex_pat not in seen:
+            seen.add(hex_pat)
+            out.append(hex_pat)
+    return out
 
 
 def split_constant_pairs(s: str, min_length: int = 4) -> list[tuple[str, str]]:

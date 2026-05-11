@@ -28,6 +28,8 @@ class HunterConfig:
         scan_stack_strings: Scan writable memory for runtime-assembled stack strings.
         scan_rwx_regions: Scan process-wide RWX (JIT) memory regions.
         scan_encoded_strings: Search for XOR/base64-encoded TLS strings.
+        scan_all_modules: Bypass TLS heuristic filter; scan every module except the hard skip-list.
+        scan_everything: Scan every loaded module including libc/libm/ART; bypasses size filter.
     """
 
     target: str = ""
@@ -47,6 +49,8 @@ class HunterConfig:
     scan_stack_strings: bool = False
     scan_rwx_regions: bool = False
     scan_encoded_strings: bool = False
+    scan_all_modules: bool = False
+    scan_everything: bool = False
 
     def __post_init__(self):
         # Deprecation shim: if someone passes a string to mobile, migrate to serial

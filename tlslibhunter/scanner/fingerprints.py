@@ -29,6 +29,7 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
         fingerprint_strings=[
             "BoringSSL",
             "OpenSSL 1.1.0 (compatible; BoringSSL)",
+            "tls13_hkdf_expand",   # BoringSSL HKDF helper
         ],
         version_patterns=[],  # BoringSSL has no version strings by design
     ),
@@ -49,6 +50,7 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
             "OpenSSL 3.",
             "OpenSSL 1.1.",
             "OpenSSL 1.0.",
+            "tls13_hkdf_expand",   # OpenSSL/BoringSSL HKDF helper
         ],
         version_patterns=[
             r"OpenSSL\s+(\d+\.\d+\.\d+[a-z]?)",
@@ -132,6 +134,8 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
         display_name="Go crypto/tls",
         fingerprint_strings=[
             "crypto/tls",
+            ".gopclntab",
+            ".go.buildinfo",
         ],
         version_patterns=[],
     ),
@@ -140,6 +144,21 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
         display_name="Rustls",
         fingerprint_strings=[
             "rustls",
+        ],
+        version_patterns=[],
+    ),
+    # Rust runtime language hint — NOT a TLS library, but useful to know the
+    # binary is Rust-built (the TLS code may be rustls, aws-lc-rs, or other).
+    # Placed LAST so any actual TLS library fingerprint wins priority.
+    LibraryFingerprint(
+        library_type="rust-binary",
+        display_name="Rust runtime",
+        fingerprint_strings=[
+            "rust_eh_personality",
+            "core::panicking::panic_fmt",
+            "std::rt::lang_start",
+            "_ZN3std2rt10lang_start",
+            "DW.ref.rust_eh_personality",
         ],
         version_patterns=[],
     ),

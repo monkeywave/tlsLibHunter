@@ -40,11 +40,13 @@ class ExtractionStrategy:
         session: Any,
         platform: str,
         output_dir: str,
+        serial: str | None = None,
     ):
         self._backend = backend
         self._session = session
         self._platform = platform
         self._output_dir = output_dir
+        self._serial = serial
         self._handler = get_platform_handler(platform)
 
         # Build ordered list of extractors from platform's extraction order
@@ -53,7 +55,11 @@ class ExtractionStrategy:
         seen = set()
         for name in method_names:
             if name in EXTRACTORS and name not in seen:
-                self._extractors.append(EXTRACTORS[name]())
+                cls = EXTRACTORS[name]
+                if getattr(cls, "needs_serial", False):
+                    self._extractors.append(cls(serial=self._serial))
+                else:
+                    self._extractors.append(cls())
                 seen.add(name)
 
     def extract(self, library: DetectedLibrary) -> ExtractionResult:

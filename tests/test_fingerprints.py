@@ -133,3 +133,77 @@ class TestFingerprintDataIntegrity:
         """LibreSSL must be checked before OpenSSL in priority order."""
         types = [fp.library_type for fp in LIBRARY_FINGERPRINTS]
         assert types.index("libressl") < types.index("openssl")
+
+
+# --- gotls section markers + rust-binary fingerprint additions ---
+
+def test_gotls_fingerprint_includes_section_names():
+    """gotls entry must include .gopclntab and .go.buildinfo section markers."""
+    from tlslibhunter.scanner.fingerprints import LIBRARY_FINGERPRINTS
+    gotls = next(fp for fp in LIBRARY_FINGERPRINTS if fp.library_type == "gotls")
+    assert ".gopclntab" in gotls.fingerprint_strings
+    assert ".go.buildinfo" in gotls.fingerprint_strings
+    assert "crypto/tls" in gotls.fingerprint_strings  # existing entry preserved
+
+
+def test_rust_binary_fingerprint_exists():
+    """New rust-binary entry must exist with the 5 Rust runtime markers."""
+    from tlslibhunter.scanner.fingerprints import LIBRARY_FINGERPRINTS
+    rust_bin = next(
+        (fp for fp in LIBRARY_FINGERPRINTS if fp.library_type == "rust-binary"),
+        None,
+    )
+    assert rust_bin is not None, "rust-binary fingerprint missing"
+    assert rust_bin.display_name == "Rust runtime"
+    expected = {
+        "rust_eh_personality",
+        "core::panicking::panic_fmt",
+        "std::rt::lang_start",
+        "_ZN3std2rt10lang_start",
+        "DW.ref.rust_eh_personality",
+    }
+    assert expected.issubset(set(rust_bin.fingerprint_strings))
+
+
+def test_rust_binary_placed_after_rustls_in_priority():
+    """rust-binary must come AFTER rustls so that rustls wins for actual rustls libs."""
+    from tlslibhunter.scanner.fingerprints import LIBRARY_FINGERPRINTS
+    types = [fp.library_type for fp in LIBRARY_FINGERPRINTS]
+    assert "rustls" in types and "rust-binary" in types
+    assert types.index("rustls") < types.index("rust-binary")
+
+
+def test_priority_boringssl_beats_rust_runtime():
+    """A binary with BOTH BoringSSL and Rust runtime strings classifies as boringssl."""
+    from tlslibhunter.scanner.fingerprints import fingerprint_library
+    lib_type, _ = fingerprint_library(["BoringSSL 5.0", "rust_eh_personality"])
+    assert lib_type == "boringssl"
+
+
+def test_priority_rustls_beats_rust_runtime():
+    """A rustls binary still classifies as rustls (not generic rust-binary)."""
+    from tlslibhunter.scanner.fingerprints import fingerprint_library
+    lib_type, _ = fingerprint_library(["rustls 0.21.0", "rust_eh_personality"])
+    assert lib_type == "rustls"
+
+
+def test_rust_only_binary_classifies_as_rust_binary():
+    """A Rust binary with NO TLS library strings classifies as rust-binary."""
+    from tlslibhunter.scanner.fingerprints import fingerprint_library
+    lib_type, _ = fingerprint_library(["rust_eh_personality", "std::rt::lang_start"])
+    assert lib_type == "rust-binary"
+
+
+def test_tls13_hkdf_expand_string_in_openssl_or_boringssl():
+    """OpenSSL or BoringSSL fingerprints must include tls13_hkdf_expand marker."""
+    from tlslibhunter.scanner.fingerprints import get_all_fingerprint_strings
+    all_strings = get_all_fingerprint_strings()
+    assert "tls13_hkdf_expand" in all_strings
+
+
+def test_get_all_fingerprint_strings_includes_new_additions():
+    """The full fingerprint string union includes the new additions."""
+    from tlslibhunter.scanner.fingerprints import get_all_fingerprint_strings
+    all_strings = get_all_fingerprint_strings()
+    for s in (".gopclntab", ".go.buildinfo", "rust_eh_personality"):
+        assert s in all_strings, f"{s!r} missing from get_all_fingerprint_strings()"

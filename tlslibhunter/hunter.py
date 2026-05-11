@@ -162,6 +162,8 @@ class TLSLibHunter:
             scan_stack_strings=self._config.scan_stack_strings,
             scan_rwx_regions=self._config.scan_rwx_regions,
             scan_encoded_strings=self._config.scan_encoded_strings,
+            scan_all_modules=self._config.scan_all_modules,
+            scan_everything=self._config.scan_everything,
         )
 
         try:
@@ -197,6 +199,7 @@ class TLSLibHunter:
             session=self._session,
             platform=self._platform,
             output_dir=output_dir,
+            serial=self._config.serial or getattr(self._device, "id", None),
         )
 
         # Reorder: extract disk-copyable libraries first (instant), then

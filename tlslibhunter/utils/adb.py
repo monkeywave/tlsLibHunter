@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
+import threading
+import time
 
 logger = logging.getLogger("tlslibhunter.utils.adb")
 
@@ -24,6 +27,64 @@ def run_cmd(args: list[str], timeout: int = 60) -> tuple[int, str]:
         return 1, "Command timed out"
     except Exception as e:
         return 1, f"Command failed: {e}"
+
+
+_SERIAL_LINE_RE = re.compile(r"^([\w.:\-]+)\s+device\s*$")
+_MULTI_DEVICE_RE = re.compile(r"more than one device(?:/emulator)?", re.IGNORECASE)
+_NOT_FOUND_RE = re.compile(r"device '([^']+)' not found", re.IGNORECASE)
+
+_serial_cache: dict[str, object] = {"ts": 0.0, "serials": []}
+_serial_lock = threading.Lock()
+_SERIAL_TTL = 5.0
+
+
+def list_adb_serials() -> list[str]:
+    """Return connected device serials parsed from `adb devices`.
+
+    Returns an empty list if adb is unavailable, the command fails, or the
+    output cannot be parsed. Only devices in the "device" state are returned
+    (offline / unauthorized / no-permissions entries are skipped).
+    """
+    if not check_adb():
+        return []
+    ret, out = run_cmd(["adb", "devices"], timeout=10)
+    if ret != 0:
+        return []
+    serials: list[str] = []
+    for line in out.splitlines()[1:]:  # skip "List of devices attached" header
+        m = _SERIAL_LINE_RE.match(line.strip())
+        if m:
+            serials.append(m.group(1))
+    return serials
+
+
+def _cached_serials() -> list[str]:
+    """Return adb serials with a 5-second TTL cache to avoid repeated adb calls."""
+    with _serial_lock:
+        now = time.monotonic()
+        if now - _serial_cache["ts"] < _SERIAL_TTL:
+            return list(_serial_cache["serials"])
+        s = list_adb_serials()
+        _serial_cache["ts"] = now
+        _serial_cache["serials"] = s
+        return list(s)
+
+
+def _enrich_adb_error(out: str) -> str:
+    """Append a helpful hint to adb error output when the failure points to
+    a missing or ambiguous --serial.
+    """
+    if _MULTI_DEVICE_RE.search(out):
+        serials = _cached_serials()
+        return out.rstrip() + (
+            f"\nadb requires a specific device. Available serials: {serials}. "
+            "Use --serial <SERIAL>."
+        )
+    m = _NOT_FOUND_RE.search(out)
+    if m:
+        serials = _cached_serials()
+        return out.rstrip() + f"\nDevice '{m.group(1)}' not connected. Available: {serials}."
+    return out
 
 
 def adb_pull(remote: str, local: str, serial: str | None = None, timeout: int = 180) -> tuple[bool, str]:
@@ -45,6 +106,8 @@ def adb_pull(remote: str, local: str, serial: str | None = None, timeout: int = 
     cmd.extend(["pull", remote, local])
 
     ret, out = run_cmd(cmd, timeout=timeout)
+    if ret != 0:
+        out = _enrich_adb_error(out)
     return (ret == 0, out)
 
 
@@ -62,7 +125,10 @@ def adb_shell(cmd: str, serial: str | None = None) -> tuple[int, str]:
     if serial:
         args.extend(["-s", serial])
     args.extend(["shell", cmd])
-    return run_cmd(args, timeout=60)
+    ret, out = run_cmd(args, timeout=60)
+    if ret != 0:
+        out = _enrich_adb_error(out)
+    return ret, out
 
 
 def get_package_apk_paths(package: str, serial: str | None = None) -> list[str]:

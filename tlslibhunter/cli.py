@@ -75,6 +75,18 @@ examples:
         action="store_true",
         help="Search for XOR/base64-encoded TLS strings",
     )
+    p.add_argument(
+        "--scan-all-modules",
+        action="store_true",
+        help="Bypass TLS heuristic filter; scan every module except the hard skip-list "
+             "(libc, libm, libart, *.oat, etc.). Logs per-module SCAN/SKIP lines.",
+    )
+    p.add_argument(
+        "--scan-everything",
+        action="store_true",
+        help="Scan every loaded module INCLUDING libc/libm/ART runtime files. Also "
+             "bypasses the 10 KiB minimum-size filter. Diagnostic / paranoia mode.",
+    )
     return p
 
 
@@ -117,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         scan_stack_strings=args.scan_stack_strings,
         scan_rwx_regions=args.scan_rwx_regions,
         scan_encoded_strings=args.scan_encoded_strings,
+        scan_all_modules=args.scan_all_modules,
+        scan_everything=args.scan_everything,
     )
 
     formatter = get_formatter(config.format)

@@ -43,3 +43,16 @@ class TestCLIParsing:
         assert args.mobile is False
         assert args.serial is None
         assert args.list_only is False
+
+    def test_scan_all_modules_flag_parses(self):
+        args = self.parser.parse_args(["foo", "--scan-all-modules"])
+        assert args.scan_all_modules is True
+
+    def test_scan_everything_flag_parses(self):
+        args = self.parser.parse_args(["foo", "--scan-everything"])
+        assert args.scan_everything is True
+
+    def test_scan_flags_default_false(self):
+        args = self.parser.parse_args(["foo"])
+        assert args.scan_all_modules is False
+        assert args.scan_everything is False

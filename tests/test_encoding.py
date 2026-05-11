@@ -1,6 +1,8 @@
 """Tests for hex pattern encoding utilities."""
 
 from tlslibhunter.utils.encoding import (
+    ascii_null_terminated_to_hex,
+    ascii_space_padded_to_hex,
     ascii_to_hex,
     base64_encode_to_hex,
     build_scan_patterns,
@@ -8,6 +10,8 @@ from tlslibhunter.utils.encoding import (
     reversed_chunks_to_hex,
     split_constant_pairs,
     split_constants_to_hex,
+    utf16be_to_hex,
+    utf16le_null_terminated_to_hex,
     utf16le_to_hex,
     xor_encode_to_hex,
 )
@@ -158,3 +162,77 @@ class TestBase64EncodeToHex:
         result = base64_encode_to_hex("SSL")
         expected = ascii_to_hex("U1NM")
         assert result == expected
+
+
+class TestUtf16beToHex:
+    def test_utf16be_to_hex_basic(self):
+        assert utf16be_to_hex("SSL") == "00 53 00 53 00 4c"
+
+    def test_utf16be_to_hex_empty(self):
+        assert utf16be_to_hex("") == ""
+
+
+class TestAsciiNullTerminatedToHex:
+    def test_ascii_null_terminated_to_hex_basic(self):
+        assert ascii_null_terminated_to_hex("SSL") == "53 53 4c 00"
+
+
+class TestUtf16leNullTerminatedToHex:
+    def test_utf16le_null_terminated_to_hex_basic(self):
+        assert utf16le_null_terminated_to_hex("SSL") == "53 00 53 00 4c 00 00 00"
+
+
+class TestAsciiSpacePaddedToHex:
+    def test_ascii_space_padded_to_hex_short(self):
+        # "tls13 " has 6 chars (trailing space included); pad_to=8 adds two 0x20 bytes.
+        assert ascii_space_padded_to_hex("tls13 ", pad_to=8) == "74 6c 73 31 33 20 20 20"
+
+    def test_ascii_space_padded_to_hex_already_long(self):
+        assert ascii_space_padded_to_hex("abcdefgh", pad_to=8) == "61 62 63 64 65 66 67 68"
+
+
+class TestReversedChunksToHexChunkSize:
+    def test_reversed_chunks_4byte(self):
+        assert reversed_chunks_to_hex("abcd", chunk_size=4) == [ascii_to_hex("dcba")]
+
+    def test_reversed_chunks_8byte_min_length_preserved(self):
+        # 5 chars, below the 6 floor for chunk_size=8
+        assert reversed_chunks_to_hex("abcde", chunk_size=8) == []
+
+    def test_reversed_chunks_4byte_3char_skipped(self):
+        # 3 chars, below the 4 floor for chunk_size=4
+        assert reversed_chunks_to_hex("abc", chunk_size=4) == []
+
+
+class TestBuildScanPatternsExtended:
+    def test_build_scan_patterns_contains_all_encodings(self):
+        target = "CLIENT_RANDOM"
+        result = build_scan_patterns(target)
+        assert ascii_to_hex(target) in result
+        assert ascii_null_terminated_to_hex(target) in result
+        assert utf16le_to_hex(target) in result
+        assert utf16le_null_terminated_to_hex(target) in result
+        assert utf16be_to_hex(target) in result
+        # At least one 8-byte reversed chunk entry
+        eight_byte = reversed_chunks_to_hex(target)
+        assert len(eight_byte) >= 1
+        assert any(p in result for p in eight_byte)
+        # At least one 4-byte reversed chunk entry
+        four_byte = reversed_chunks_to_hex(target, chunk_size=4)
+        assert len(four_byte) >= 1
+        assert any(p in result for p in four_byte)
+
+    def test_build_scan_patterns_skips_utf16be_for_short_strings(self):
+        # First confirm utf16be_to_hex("IV") produces a non-empty string when called directly
+        assert utf16be_to_hex("IV") != ""
+        result = build_scan_patterns("IV")
+        assert utf16be_to_hex("IV") not in result
+
+    def test_build_scan_patterns_dedups_empty_strings_filtered(self):
+        # Should not crash; result is a list (possibly empty).
+        result = build_scan_patterns("")
+        assert isinstance(result, list)
+
+    def test_build_scan_patterns_returns_unique_patterns(self):
+        result = build_scan_patterns("CLIENT_RANDOM")
+        assert len(set(result)) == len(result)

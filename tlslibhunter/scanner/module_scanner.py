@@ -15,6 +15,7 @@ from tlslibhunter.scanner.tls_indicators import (
     TLS_DERIVATION_LABELS,
     TLS_EXPORT_SYMBOLS,
     TLS_STRING_PATTERNS,
+    TLS_STRING_PATTERNS_STRICT,
     is_known_tls_library,
 )
 from tlslibhunter.utils.encoding import build_scan_patterns
@@ -54,26 +55,22 @@ def _build_hex_patterns(strings: list[str] | None = None) -> list[str]:
 def _build_hex_pattern_map(strings: list[str]) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Build hex patterns with a reverse mapping to source label and encoding type.
 
+    Encoding variants come from `iter_encodings` so this stays in sync with
+    `build_scan_patterns`.
+
     Returns:
         Tuple of (hex_patterns, hex_to_label_map) where hex_to_label_map maps
         each hex pattern to (original_label, encoding_type).
     """
-    from tlslibhunter.utils.encoding import ascii_to_hex, reversed_chunks_to_hex, utf16le_to_hex
+    from tlslibhunter.utils.encoding import iter_encodings
 
     hex_to_label: dict[str, tuple[str, str]] = {}
-    seen = set()
-    unique = []
+    seen: set[str] = set()
+    unique: list[str] = []
 
     for label in strings:
-        encodings = [
-            (ascii_to_hex(label), "ascii"),
-            (utf16le_to_hex(label), "utf16le"),
-        ]
-        for rev_hex in reversed_chunks_to_hex(label):
-            encodings.append((rev_hex, "reversed_chunk"))
-
-        for hex_pat, enc_type in encodings:
-            if hex_pat not in seen:
+        for hex_pat, enc_type in iter_encodings(label):
+            if hex_pat and hex_pat not in seen:
                 seen.add(hex_pat)
                 unique.append(hex_pat)
                 hex_to_label[hex_pat] = (label, enc_type)
@@ -201,6 +198,20 @@ def _build_probe_patterns() -> list[str]:
     return [ascii_to_hex(label) for label in _PROBE_LABELS]
 
 
+_COVERAGE_LOG_PREVIEW = 10  # Show at most this many module names in the coverage-summary log line
+
+
+def _summarize_names(names: list[str], preview: int = _COVERAGE_LOG_PREVIEW) -> str:
+    """Render a possibly-long list as 'a, b, c (and N more)'.
+
+    Used by the coverage-summary log so a 300-module skip list doesn't
+    produce a multi-kilobyte log record.
+    """
+    if len(names) <= preview:
+        return repr(names)
+    return f"[{', '.join(repr(n) for n in names[:preview])}, ... (and {len(names) - preview} more)]"
+
+
 # Scan thresholds — tuning knobs for detection sensitivity vs speed
 _TLS_EARLY_EXIT_THRESHOLD = 5  # Stop TLS pattern scan after this many hits
 _FP_EARLY_EXIT_THRESHOLD = 5  # Stop fingerprint scan after this many hits
@@ -223,6 +234,8 @@ class ModuleScanner:
         scan_stack_strings: bool = False,
         scan_rwx_regions: bool = False,
         scan_encoded_strings: bool = False,
+        scan_all_modules: bool = False,
+        scan_everything: bool = False,
     ):
         self._backend = backend
         self._session = session
@@ -233,9 +246,14 @@ class ModuleScanner:
         self._scan_stack_strings = scan_stack_strings
         self._scan_rwx_regions = scan_rwx_regions
         self._scan_encoded_strings = scan_encoded_strings
+        self._scan_all_modules = scan_all_modules
+        self._scan_everything = scan_everything
         self._classifier = ModuleClassifier(platform, package_name)
         self._script = None
         self._exports = None
+        # Coverage tracking populated during scan() — surfaced in pipeline_stats.
+        self._skipped_hard: list[str] = []
+        self._skipped_heuristic: list[str] = []
 
     def _ensure_script(self) -> None:
         """Load the scanner script if not already loaded."""
@@ -280,7 +298,13 @@ class ModuleScanner:
             size = int(mod.get("size", 0) or 0)
 
             if not self._classifier.is_scan_worthy(name, path):
-                continue
+                if not self._scan_everything:
+                    self._skipped_hard.append(name)
+                    logger.info("SKIP (hard-irrelevant) %s", name)
+                    continue
+                logger.info("SCAN (forced by --scan-everything) %s", name)
+            else:
+                logger.info("SCAN %s", name)
             scanned += 1
             try:
                 matches = self._exports.scan_module_kernel_level(name, hex_patterns)
@@ -509,12 +533,44 @@ class ModuleScanner:
         # ============================================================
         # STAGE 1: Name/path filtering (Python-side, instant)
         # ============================================================
+        # Coverage gates:
+        #   default                  -> heuristic is_tls_candidate filter + hard is_scan_worthy skip-list
+        #   --scan-all-modules       -> bypass heuristic; hard skip-list still applies
+        #   --scan-everything        -> also bypass hard skip-list (truly every module)
+        if self._scan_all_modules or self._scan_everything:
+            logger.info(
+                "Coverage mode: %s (per-module SCAN/SKIP lines follow)",
+                "scan-everything" if self._scan_everything else "scan-all-modules",
+            )
+
+        force_scan = self._scan_all_modules or self._scan_everything
+
         stage1_candidates = []
         for mod in modules:
             name = mod.get("name", "")
             path = mod.get("path", "")
-            if self._classifier.is_tls_candidate(name, path):
+
+            if not self._classifier.is_scan_worthy(name, path):
+                if not self._scan_everything:
+                    self._skipped_hard.append(name)
+                    if self._scan_all_modules:
+                        logger.info("SKIP (hard-irrelevant) %s", name)
+                    continue
+                logger.info("SCAN (forced by --scan-everything) %s", name)
                 stage1_candidates.append(mod)
+                continue
+
+            if not self._classifier.is_tls_candidate(name, path):
+                if not force_scan:
+                    self._skipped_heuristic.append(name)
+                    continue
+                logger.info("SCAN (forced by --scan-all-modules) %s", name)
+                stage1_candidates.append(mod)
+                continue
+
+            if force_scan:
+                logger.info("SCAN %s", name)
+            stage1_candidates.append(mod)
 
         logger.info(
             "After name/path filtering: %d candidates (%d skipped)",
@@ -576,8 +632,10 @@ class ModuleScanner:
         # ============================================================
         # STAGE 3: Quick TLS probe (single RPC call, lightweight)
         # ============================================================
-        # Pre-filter: skip tiny modules that cannot contain a TLS implementation
-        no_exports = [m for m in no_exports if int(m.get("size", 0) or 0) >= _MIN_TLS_MODULE_SIZE]
+        # Pre-filter: skip tiny modules that cannot contain a TLS implementation.
+        # --scan-everything bypasses this floor for diagnostic / paranoia mode.
+        if not self._scan_everything:
+            no_exports = [m for m in no_exports if int(m.get("size", 0) or 0) >= _MIN_TLS_MODULE_SIZE]
         probe_confirmed = []
         if no_exports:
             probe_patterns = _build_probe_patterns()
@@ -612,10 +670,17 @@ class ModuleScanner:
         # ============================================================
         logger.info("Running detailed scan on %d modules...", len(all_confirmed))
 
-        hex_patterns = _build_hex_patterns()
+        # Choose pattern set: strict (no short/high-FP labels) by default; broad
+        # (includes "tls13 ", "derived", "finished", "derive_secret") when the
+        # user explicitly opts into thoroughness via --scan-all-modules/--scan-everything.
+        if self._scan_all_modules or self._scan_everything:
+            pattern_source = TLS_STRING_PATTERNS
+        else:
+            pattern_source = TLS_STRING_PATTERNS_STRICT
+        hex_patterns = _build_hex_patterns(pattern_source)
         fp_hex_patterns, fp_hex_to_string = _build_fingerprint_hex_patterns()
 
-        source_strings = TLS_STRING_PATTERNS
+        source_strings = pattern_source
         split_pairs = []
         encoded_patterns = []
         if self._scan_split_constants:
@@ -688,6 +753,10 @@ class ModuleScanner:
             "confirmed_by_exports": len(export_confirmed),
             "after_tls_probe": len(all_confirmed),
             "detailed_scan": len(all_confirmed),
+            "scan_all_modules_enabled": self._scan_all_modules,
+            "scan_everything_enabled": self._scan_everything,
+            "hard_skipped_names": self._skipped_hard,
+            "heuristic_skipped_names": self._skipped_heuristic,
         }
         result.total_modules_scanned = len(all_confirmed)
         result.scan_duration_seconds = time.time() - start_time
@@ -698,6 +767,22 @@ class ModuleScanner:
             len(all_confirmed),
             result.scan_duration_seconds,
         )
+        if self._scan_all_modules or self._scan_everything or self._skipped_hard or self._skipped_heuristic:
+            hard_suffix = f": {_summarize_names(self._skipped_hard)}" if self._skipped_hard else ""
+            heuristic_hint = (
+                " (use --scan-all-modules to include)"
+                if self._skipped_heuristic and not self._scan_all_modules
+                else ""
+            )
+            logger.info(
+                "Coverage: scanned %d/%d modules. Hard-skipped %d%s. Heuristic-skipped %d%s.",
+                len(stage1_candidates),
+                deduped_count,
+                len(self._skipped_hard),
+                hard_suffix,
+                len(self._skipped_heuristic),
+                heuristic_hint,
+            )
 
         # RWX region scan
         if self._scan_rwx_regions:

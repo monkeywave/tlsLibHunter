@@ -11,6 +11,11 @@ from tlslibhunter.scanner.results import DetectedLibrary, ExtractionResult
 class Extractor(abc.ABC):
     """Abstract base class for library extraction methods."""
 
+    # Marker attribute: subclasses that drive `adb` set this True so the
+    # ExtractionStrategy dispatch passes a `serial=` kwarg. Default False
+    # keeps the iOS/disk/memory extractors decoupled from device IDs.
+    needs_serial: bool = False
+
     @property
     @abc.abstractmethod
     def method_name(self) -> str:

@@ -59,3 +59,19 @@ class TestHunterConfig:
     def test_effective_output_dir_sanitizes_slashes(self):
         config = HunterConfig(target="com.example/app")
         assert "/" not in config.effective_output_dir.split("tls_libs_")[-1]
+
+    def test_scan_all_modules_default_false(self):
+        cfg = HunterConfig(target="x")
+        assert cfg.scan_all_modules is False
+
+    def test_scan_everything_default_false(self):
+        cfg = HunterConfig(target="x")
+        assert cfg.scan_everything is False
+
+    def test_scan_all_modules_can_be_set(self):
+        cfg = HunterConfig(target="x", scan_all_modules=True)
+        assert cfg.scan_all_modules is True
+
+    def test_scan_everything_can_be_set(self):
+        cfg = HunterConfig(target="x", scan_everything=True)
+        assert cfg.scan_everything is True

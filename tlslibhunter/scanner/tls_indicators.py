@@ -27,6 +27,12 @@ TLS13_HKDF_LABELS: list[str] = [
     "res master",
     "c e traffic",
     "e exp master",
+    # RFC 8446 context prefix + PSK binders + derive-secret steps
+    "tls13 ",       # context prefix (note trailing space) - short, gated to label-mode
+    "res binder",   # PSK resumption binder
+    "ext binder",   # external PSK binder
+    "derived",      # derive-secret root step - short, gated to label-mode
+    "finished",     # finished-key derivation - short, gated to label-mode
 ]
 
 # RFC 5246 TLS 1.2 PRF labels
@@ -34,13 +40,33 @@ TLS12_PRF_LABELS: list[str] = [
     "key expansion",
     "master secret",
     "extended master secret",
+    "client finished",
+    "server finished",
 ]
 
-# Combined: all RFC TLS derivation labels (for raw label scan mode)
-TLS_DERIVATION_LABELS: list[str] = TLS13_HKDF_LABELS + TLS12_PRF_LABELS
+# OpenSSL/BoringSSL internal HKDF helper strings — present in .rodata of
+# OpenSSL-family libraries even when stripped.
+OPENSSL_HKDF_HELPERS: list[str] = [
+    "tls13_hkdf_expand",
+    "derive_secret",   # common English fragment; gated to --scan-labels
+]
 
-# All TLS string patterns scanned in memory (keylog + derivation labels)
+# Short or high-FP labels that should only appear in --scan-labels mode.
+_LABEL_MODE_ONLY: set[str] = {"tls13 ", "derived", "finished", "derive_secret"}
+
+# Combined: all RFC TLS derivation labels (for raw label scan mode)
+TLS_DERIVATION_LABELS: list[str] = (
+    TLS13_HKDF_LABELS + TLS12_PRF_LABELS + OPENSSL_HKDF_HELPERS
+)
+
+# All TLS string patterns including short/gated labels (used in --scan-labels mode).
 TLS_STRING_PATTERNS: list[str] = _TLS_KEYLOG_PATTERNS + TLS_DERIVATION_LABELS
+
+# Strict subset that excludes short/high-FP labels — used in the default scan mode
+# to keep precision high. Label-mode callers should use TLS_STRING_PATTERNS instead.
+TLS_STRING_PATTERNS_STRICT: list[str] = [
+    s for s in TLS_STRING_PATTERNS if s not in _LABEL_MODE_ONLY
+]
 
 # Known TLS library export symbols for library type detection
 TLS_EXPORT_SYMBOLS: dict[str, str] = {
@@ -93,6 +119,15 @@ TLS_EXPORT_SYMBOLS: dict[str, str] = {
     "botan_tls_client_init": "botan",
     # Rustls
     "rustls_client_config_builder_new": "rustls",
+}
+
+# Go runtime internal symbol names (NOT dynamic-linker exports). Found in
+# .gopclntab metadata. Kept separate from TLS_EXPORT_SYMBOLS so they do not
+# vote in identify_library_type() — they are language/runtime hints, not
+# linker exports.
+GO_RUNTIME_SYMBOLS: dict[str, str] = {
+    "crypto_tls_prf10": "gotls",
+    "crypto_tls_pHash": "gotls",
 }
 
 # Known TLS library stems -> library type (matched by exact stem after stripping extensions/versions)

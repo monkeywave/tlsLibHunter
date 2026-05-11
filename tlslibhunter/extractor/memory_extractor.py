@@ -54,6 +54,10 @@ class MemoryExtractor(Extractor):
         dump_state: dict[str, Any] = {
             "file": None,
             "received": 0,
+            "expected_size": None,
+            "readable_size": None,
+            "gap_count": 0,
+            "gap_bytes": 0,
             "done": threading.Event(),
             "failed": False,
             "error": "",
@@ -61,26 +65,46 @@ class MemoryExtractor(Extractor):
 
         def on_message(msg, data):
             payload = msg.get("payload") or {}
-            if msg.get("type") == "send":
-                if payload.get("type") == "chunk":
-                    if payload.get("failed"):
-                        dump_state["failed"] = True
-                        dump_state["error"] = "Memory read failed"
-                        dump_state["done"].set()
-                        return
-                    if dump_state["file"] and data:
-                        try:
-                            offset = payload.get("offset", 0)
+            if msg.get("type") != "send":
+                return
+            ptype = payload.get("type")
+            if ptype == "meta":
+                total = int(payload.get("total_size") or 0)
+                dump_state["expected_size"] = total
+                dump_state["readable_size"] = int(payload.get("readable_size") or 0)
+                dump_state["gap_count"] = int(payload.get("gap_count") or 0)
+                # Pre-zero the file to module.size so unwritten gaps are zero-filled
+                # and len(output) == module.size for downstream tools (Ghidra/IDA).
+                if dump_state["file"] and total > 0:
+                    try:
+                        dump_state["file"].truncate(total)
+                    except Exception as e:
+                        logger.error("Truncate error: %s", e)
+                return
+            if ptype == "gap":
+                dump_state["gap_bytes"] += int(payload.get("size") or 0)
+                return  # truncate() already zero-filled this region
+            if ptype == "chunk":
+                if payload.get("failed"):
+                    dump_state["failed"] = True
+                    dump_state["error"] = "Memory read failed"
+                    dump_state["done"].set()
+                    return
+                if dump_state["file"] and data:
+                    try:
+                        offset = payload.get("offset", 0)
+                        if offset >= 0:
                             dump_state["file"].seek(offset)
-                            dump_state["file"].write(data)
-                            dump_state["received"] += len(data)
-                        except Exception as e:
-                            logger.error("Write error: %s", e)
-                    if payload.get("final"):
-                        dump_state["done"].set()
-                elif payload.get("type") == "error":
-                    dump_state["error"] = payload.get("message", "Unknown error")
-                    logger.warning("Dump error for %s: %s", library.name, dump_state["error"])
+                        dump_state["file"].write(data)
+                        dump_state["received"] += len(data)
+                    except Exception as e:
+                        logger.error("Write error: %s", e)
+                if payload.get("final"):
+                    dump_state["done"].set()
+                return
+            if ptype == "error":
+                dump_state["error"] = payload.get("message", "Unknown error")
+                logger.warning("Dump error for %s: %s", library.name, dump_state["error"])
 
         try:
             with open(_EXTRACTOR_JS) as f:
@@ -102,9 +126,13 @@ class MemoryExtractor(Extractor):
             with contextlib.suppress(Exception):
                 script.unload()
 
-            if dump_state["failed"]:
-                # Clean up empty/failed dumps
-                if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
+            received = dump_state["received"]
+            expected = dump_state["expected_size"] or 0
+            gap_count = dump_state["gap_count"]
+            gap_bytes = dump_state["gap_bytes"]
+
+            if dump_state["failed"] or received == 0:
+                with contextlib.suppress(FileNotFoundError):
                     os.remove(output_path)
                 return ExtractionResult(
                     library=library,
@@ -113,13 +141,23 @@ class MemoryExtractor(Extractor):
                     error=dump_state["error"] or "Memory dump failed",
                 )
 
-            size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            try:
+                size = os.path.getsize(output_path)
+            except FileNotFoundError:
+                size = 0
+            method_name = self.method_name
+            if gap_count > 0:
+                logger.warning(
+                    "Partial memory dump for %s: %d/%d bytes readable, %d gap(s) zero-filled (%d bytes)",
+                    library.name, received, expected or size, gap_count, gap_bytes,
+                )
+                method_name = "memory_dump_partial"
             logger.info("Memory dump: %s -> %s (%d bytes)", library.name, output_path, size)
             return ExtractionResult(
                 library=library,
                 success=True,
                 output_path=output_path,
-                method=self.method_name,
+                method=method_name,
                 size_bytes=size,
             )
 

@@ -17,6 +17,11 @@ logger = logging.getLogger("tlslibhunter.extractor.android")
 class ApkInnerExtractor(Extractor):
     """Extract libraries from APK inner paths (path!inner syntax)."""
 
+    needs_serial = True
+
+    def __init__(self, serial: str | None = None):
+        self._serial = serial
+
     @property
     def method_name(self) -> str:
         return "apk_inner"
@@ -50,7 +55,7 @@ class ApkInnerExtractor(Extractor):
         local_apk = os.path.join(tmp_dir, os.path.basename(remote_apk))
 
         if not os.path.exists(local_apk):
-            ok, msg = adb_pull(remote_apk, local_apk)
+            ok, msg = adb_pull(remote_apk, local_apk, serial=self._serial)
             if not ok:
                 return ExtractionResult(
                     library=library,
@@ -109,6 +114,11 @@ class ApkInnerExtractor(Extractor):
 class AdbPullExtractor(Extractor):
     """Extract libraries via adb pull."""
 
+    needs_serial = True
+
+    def __init__(self, serial: str | None = None):
+        self._serial = serial
+
     @property
     def method_name(self) -> str:
         return "adb_pull"
@@ -139,7 +149,7 @@ class AdbPullExtractor(Extractor):
             )
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        ok, msg = adb_pull(library.path, output_path)
+        ok, msg = adb_pull(library.path, output_path, serial=self._serial)
 
         if ok and os.path.exists(output_path):
             size = os.path.getsize(output_path)

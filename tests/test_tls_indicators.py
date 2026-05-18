@@ -200,9 +200,8 @@ class TestTLSDerivationLabels:
 
     def test_derivation_labels_is_combined(self):
         from tlslibhunter.scanner.tls_indicators import OPENSSL_HKDF_HELPERS
-        assert TLS_DERIVATION_LABELS == (
-            TLS13_HKDF_LABELS + TLS12_PRF_LABELS + OPENSSL_HKDF_HELPERS
-        )
+
+        assert TLS_DERIVATION_LABELS == (TLS13_HKDF_LABELS + TLS12_PRF_LABELS + OPENSSL_HKDF_HELPERS)
 
     def test_contains_key_tls13_labels(self):
         assert "c hs traffic" in TLS13_HKDF_LABELS
@@ -232,9 +231,11 @@ class TestLibcoretlsRecognized:
 
 # --- HKDF helper / PSK binder / Go-runtime symbol additions ---
 
+
 def test_tls13_hkdf_labels_includes_new_additions():
     """TLS 1.3 HKDF labels list contains the new parity additions."""
     from tlslibhunter.scanner.tls_indicators import TLS13_HKDF_LABELS
+
     for label in ("tls13 ", "res binder", "ext binder", "derived", "finished"):
         assert label in TLS13_HKDF_LABELS, f"{label!r} missing from TLS13_HKDF_LABELS"
 
@@ -243,6 +244,7 @@ def test_tls13_label_with_trailing_space_preserved():
     """The 'tls13 ' label MUST retain its trailing space — it's part of the
     BoringSSL HKDF info encoding per RFC 8446 §7.1."""
     from tlslibhunter.scanner.tls_indicators import TLS13_HKDF_LABELS
+
     matches = [s for s in TLS13_HKDF_LABELS if s.startswith("tls13")]
     assert "tls13 " in matches
     # Confirm the literal trailing-space form is the one stored.
@@ -251,33 +253,36 @@ def test_tls13_label_with_trailing_space_preserved():
 
 def test_tls12_prf_labels_includes_finished_variants():
     from tlslibhunter.scanner.tls_indicators import TLS12_PRF_LABELS
+
     assert "client finished" in TLS12_PRF_LABELS
     assert "server finished" in TLS12_PRF_LABELS
 
 
 def test_openssl_hkdf_helpers_constant_exists():
     from tlslibhunter.scanner.tls_indicators import OPENSSL_HKDF_HELPERS
+
     assert "tls13_hkdf_expand" in OPENSSL_HKDF_HELPERS
     assert "derive_secret" in OPENSSL_HKDF_HELPERS
 
 
 def test_tls_derivation_labels_includes_helpers():
     from tlslibhunter.scanner.tls_indicators import TLS_DERIVATION_LABELS
+
     assert "tls13_hkdf_expand" in TLS_DERIVATION_LABELS
     assert "derive_secret" in TLS_DERIVATION_LABELS
 
 
 def test_tls_string_patterns_strict_excludes_short_gated_labels():
     from tlslibhunter.scanner.tls_indicators import TLS_STRING_PATTERNS_STRICT
+
     for label in ("tls13 ", "derived", "finished", "derive_secret"):
-        assert label not in TLS_STRING_PATTERNS_STRICT, (
-            f"{label!r} must NOT appear in the strict-mode patterns"
-        )
+        assert label not in TLS_STRING_PATTERNS_STRICT, f"{label!r} must NOT appear in the strict-mode patterns"
 
 
 def test_tls_string_patterns_strict_keeps_long_unique_labels():
     """Strict mode keeps the keylog labels and unambiguous derivation labels."""
     from tlslibhunter.scanner.tls_indicators import TLS_STRING_PATTERNS_STRICT
+
     assert "CLIENT_RANDOM" in TLS_STRING_PATTERNS_STRICT
     assert "SSLKEYLOGFILE" in TLS_STRING_PATTERNS_STRICT
     assert "key expansion" in TLS_STRING_PATTERNS_STRICT
@@ -288,6 +293,7 @@ def test_tls_string_patterns_strict_keeps_long_unique_labels():
 
 def test_go_runtime_symbols_constant():
     from tlslibhunter.scanner.tls_indicators import GO_RUNTIME_SYMBOLS
+
     assert GO_RUNTIME_SYMBOLS["crypto_tls_prf10"] == "gotls"
     assert GO_RUNTIME_SYMBOLS["crypto_tls_pHash"] == "gotls"
 
@@ -296,5 +302,6 @@ def test_go_runtime_symbols_not_in_export_table():
     """Go runtime symbols must not pollute TLS_EXPORT_SYMBOLS — they are
     not dynamic-linker exports and should not vote in identify_library_type."""
     from tlslibhunter.scanner.tls_indicators import TLS_EXPORT_SYMBOLS
+
     assert "crypto_tls_prf10" not in TLS_EXPORT_SYMBOLS
     assert "crypto_tls_pHash" not in TLS_EXPORT_SYMBOLS

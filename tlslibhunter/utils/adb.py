@@ -77,8 +77,7 @@ def _enrich_adb_error(out: str) -> str:
     if _MULTI_DEVICE_RE.search(out):
         serials = _cached_serials()
         return out.rstrip() + (
-            f"\nadb requires a specific device. Available serials: {serials}. "
-            "Use --serial <SERIAL>."
+            f"\nadb requires a specific device. Available serials: {serials}. Use --serial <SERIAL>."
         )
     m = _NOT_FOUND_RE.search(out)
     if m:

@@ -29,7 +29,7 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
         fingerprint_strings=[
             "BoringSSL",
             "OpenSSL 1.1.0 (compatible; BoringSSL)",
-            "tls13_hkdf_expand",   # BoringSSL HKDF helper
+            "tls13_hkdf_expand",  # BoringSSL HKDF helper
         ],
         version_patterns=[],  # BoringSSL has no version strings by design
     ),
@@ -50,7 +50,7 @@ LIBRARY_FINGERPRINTS: list[LibraryFingerprint] = [
             "OpenSSL 3.",
             "OpenSSL 1.1.",
             "OpenSSL 1.0.",
-            "tls13_hkdf_expand",   # OpenSSL/BoringSSL HKDF helper
+            "tls13_hkdf_expand",  # OpenSSL/BoringSSL HKDF helper
         ],
         version_patterns=[
             r"OpenSSL\s+(\d+\.\d+\.\d+[a-z]?)",

@@ -1,4 +1,5 @@
 """Tests verifying that --serial is threaded through to all adb invocations."""
+
 from __future__ import annotations
 
 from unittest.mock import Mock, patch
@@ -14,8 +15,9 @@ def _make_library(path: str = "/data/lib/libfoo.so", name: str = "libfoo.so") ->
 
 
 def test_adb_pull_extractor_threads_serial():
-    with patch("tlslibhunter.utils.adb.check_adb", return_value=True), \
-         patch("tlslibhunter.utils.adb.run_cmd", return_value=(0, "1 file pulled")) as mock_run:
+    with patch("tlslibhunter.utils.adb.check_adb", return_value=True), patch(
+        "tlslibhunter.utils.adb.run_cmd", return_value=(0, "1 file pulled")
+    ) as mock_run:
         ext = AdbPullExtractor(serial="ABC123")
         lib = _make_library()
         ext.extract(lib, "/tmp/libfoo.so")
@@ -27,8 +29,9 @@ def test_adb_pull_extractor_threads_serial():
 
 
 def test_adb_pull_extractor_no_serial_omits_s_flag():
-    with patch("tlslibhunter.utils.adb.check_adb", return_value=True), \
-         patch("tlslibhunter.utils.adb.run_cmd", return_value=(0, "1 file pulled")) as mock_run:
+    with patch("tlslibhunter.utils.adb.check_adb", return_value=True), patch(
+        "tlslibhunter.utils.adb.run_cmd", return_value=(0, "1 file pulled")
+    ) as mock_run:
         ext = AdbPullExtractor()
         lib = _make_library()
         ext.extract(lib, "/tmp/libfoo.so")
@@ -41,8 +44,9 @@ def test_apk_inner_extractor_threads_serial(tmp_path):
     # apk_inner needs a path with '!' separator. The pull happens, then APK unzip.
     # We mock adb_pull to fail so we never reach the unzip — we only care about the call args.
     # adb_pull / check_adb are imported lazily inside extract(), so patch them at the source module.
-    with patch("tlslibhunter.utils.adb.adb_pull") as mock_pull, \
-         patch("tlslibhunter.utils.adb.check_adb", return_value=True):
+    with patch("tlslibhunter.utils.adb.adb_pull") as mock_pull, patch(
+        "tlslibhunter.utils.adb.check_adb", return_value=True
+    ):
         mock_pull.return_value = (False, "mocked failure")
         ext = ApkInnerExtractor(serial="DEV2")
         lib = _make_library(path="/data/base.apk!lib/arm64-v8a/libfoo.so")
@@ -53,8 +57,9 @@ def test_apk_inner_extractor_threads_serial(tmp_path):
 
 
 def test_apk_inner_extractor_no_serial():
-    with patch("tlslibhunter.utils.adb.adb_pull") as mock_pull, \
-         patch("tlslibhunter.utils.adb.check_adb", return_value=True):
+    with patch("tlslibhunter.utils.adb.adb_pull") as mock_pull, patch(
+        "tlslibhunter.utils.adb.check_adb", return_value=True
+    ):
         mock_pull.return_value = (False, "mocked failure")
         ext = ApkInnerExtractor()
         lib = _make_library(path="/data/base.apk!lib/arm64-v8a/libfoo.so")
@@ -66,14 +71,19 @@ def test_apk_inner_extractor_no_serial():
 
 def test_extraction_strategy_propagates_serial_to_android_extractors():
     from tlslibhunter.extractor.strategy import ExtractionStrategy
+
     backend = Mock()
     session = Mock()
     strat = ExtractionStrategy(
-        backend=backend, session=session,
-        platform="android", output_dir="/tmp", serial="XYZ",
+        backend=backend,
+        session=session,
+        platform="android",
+        output_dir="/tmp",
+        serial="XYZ",
     )
     # All adb-using extractors must have _serial set.
     from tlslibhunter.extractor.android_extractor import AdbPullExtractor, ApkInnerExtractor
+
     for ext in strat._extractors:
         if isinstance(ext, (AdbPullExtractor, ApkInnerExtractor)):
             assert ext._serial == "XYZ"
@@ -81,11 +91,15 @@ def test_extraction_strategy_propagates_serial_to_android_extractors():
 
 def test_extraction_strategy_serial_default_none():
     from tlslibhunter.extractor.strategy import ExtractionStrategy
+
     strat = ExtractionStrategy(
-        backend=Mock(), session=Mock(),
-        platform="android", output_dir="/tmp",
+        backend=Mock(),
+        session=Mock(),
+        platform="android",
+        output_dir="/tmp",
     )
     from tlslibhunter.extractor.android_extractor import AdbPullExtractor, ApkInnerExtractor
+
     for ext in strat._extractors:
         if isinstance(ext, (AdbPullExtractor, ApkInnerExtractor)):
             assert ext._serial is None
@@ -94,9 +108,13 @@ def test_extraction_strategy_serial_default_none():
 def test_extraction_strategy_non_android_unaffected():
     """For platform='ios', adb-based extractors aren't in the order, so passing serial is a no-op."""
     from tlslibhunter.extractor.strategy import ExtractionStrategy
+
     strat = ExtractionStrategy(
-        backend=Mock(), session=Mock(),
-        platform="ios", output_dir="/tmp", serial="X",
+        backend=Mock(),
+        session=Mock(),
+        platform="ios",
+        output_dir="/tmp",
+        serial="X",
     )
     # Just verify construction doesn't crash and strategy._serial is recorded.
     assert strat._serial == "X"

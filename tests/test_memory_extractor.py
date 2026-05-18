@@ -5,6 +5,7 @@ capture the on_message handler, then synthesize the message stream a real
 agent script would emit. Verifies pre-truncation, gap-zero-fill, partial-success,
 and pure-success paths.
 """
+
 from __future__ import annotations
 
 import threading
@@ -62,12 +63,9 @@ def test_extract_full_readable_module(library, tmp_path):
     """All bytes readable, no gaps — clean success."""
     payload_bytes = b"\x41" * 4096
     msgs = [
-        ({"type": "meta", "module": "libfoo.so",
-          "total_size": 4096, "readable_size": 4096, "gap_count": 0}, None),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0, "final": False},
-         payload_bytes),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 1, "offset": 4096, "final": True},
-         b""),
+        ({"type": "meta", "module": "libfoo.so", "total_size": 4096, "readable_size": 4096, "gap_count": 0}, None),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0, "final": False}, payload_bytes),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 1, "offset": 4096, "final": True}, b""),
     ]
     result = _run_extract(library, tmp_path, msgs)
     assert result.success
@@ -84,15 +82,11 @@ def test_extract_partial_with_gap_zero_filled(library, tmp_path):
     tail = b"\x42" * 1024
     msgs = [
         # meta: total 4096, readable 2048, 1 gap of 2048 between offsets 1024 and 3072.
-        ({"type": "meta", "module": "libfoo.so",
-          "total_size": 4096, "readable_size": 2048, "gap_count": 1}, None),
+        ({"type": "meta", "module": "libfoo.so", "total_size": 4096, "readable_size": 2048, "gap_count": 1}, None),
         ({"type": "gap", "module": "libfoo.so", "offset": 1024, "size": 2048}, None),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0, "final": False},
-         head),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 1, "offset": 3072, "final": False},
-         tail),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 2, "offset": 4096, "final": True},
-         b""),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0, "final": False}, head),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 1, "offset": 3072, "final": False}, tail),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 2, "offset": 4096, "final": True}, b""),
     ]
     result = _run_extract(library, tmp_path, msgs)
     assert result.success
@@ -101,20 +95,17 @@ def test_extract_partial_with_gap_zero_filled(library, tmp_path):
         contents = f.read()
     assert len(contents) == 4096
     assert contents[:1024] == head
-    assert contents[1024:3072] == b"\x00" * 2048   # gap zero-filled
+    assert contents[1024:3072] == b"\x00" * 2048  # gap zero-filled
     assert contents[3072:] == tail
 
 
 def test_extract_total_failure_when_no_bytes_received(library, tmp_path):
     """If the agent emits an error and never writes data, treat as failure."""
     msgs = [
-        ({"type": "meta", "module": "libfoo.so",
-          "total_size": 4096, "readable_size": 0, "gap_count": 1}, None),
+        ({"type": "meta", "module": "libfoo.so", "total_size": 4096, "readable_size": 0, "gap_count": 1}, None),
         ({"type": "gap", "module": "libfoo.so", "offset": 0, "size": 4096}, None),
-        ({"type": "error", "module": "libfoo.so",
-          "message": "Memory read failed at offset 0"}, None),
-        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 4096, "final": True},
-         b""),
+        ({"type": "error", "module": "libfoo.so", "message": "Memory read failed at offset 0"}, None),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 4096, "final": True}, b""),
     ]
     result = _run_extract(library, tmp_path, msgs)
     assert not result.success
@@ -124,8 +115,7 @@ def test_extract_total_failure_when_no_bytes_received(library, tmp_path):
 def test_extract_legacy_failed_flag(library, tmp_path):
     """Backward compat: the old failed=True chunk shape still aborts cleanly."""
     msgs = [
-        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0,
-          "final": True, "failed": True}, b""),
+        ({"type": "chunk", "module": "libfoo.so", "seq": 0, "offset": 0, "final": True, "failed": True}, b""),
     ]
     result = _run_extract(library, tmp_path, msgs)
     assert not result.success

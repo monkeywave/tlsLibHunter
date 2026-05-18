@@ -79,13 +79,13 @@ examples:
         "--scan-all-modules",
         action="store_true",
         help="Bypass TLS heuristic filter; scan every module except the hard skip-list "
-             "(libc, libm, libart, *.oat, etc.). Logs per-module SCAN/SKIP lines.",
+        "(libc, libm, libart, *.oat, etc.). Logs per-module SCAN/SKIP lines.",
     )
     p.add_argument(
         "--scan-everything",
         action="store_true",
         help="Scan every loaded module INCLUDING libc/libm/ART runtime files. Also "
-             "bypasses the 10 KiB minimum-size filter. Diagnostic / paranoia mode.",
+        "bypasses the 10 KiB minimum-size filter. Diagnostic / paranoia mode.",
     )
     return p
 

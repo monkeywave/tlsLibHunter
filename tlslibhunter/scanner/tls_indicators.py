@@ -28,11 +28,11 @@ TLS13_HKDF_LABELS: list[str] = [
     "c e traffic",
     "e exp master",
     # RFC 8446 context prefix + PSK binders + derive-secret steps
-    "tls13 ",       # context prefix (note trailing space) - short, gated to label-mode
-    "res binder",   # PSK resumption binder
-    "ext binder",   # external PSK binder
-    "derived",      # derive-secret root step - short, gated to label-mode
-    "finished",     # finished-key derivation - short, gated to label-mode
+    "tls13 ",  # context prefix (note trailing space) - short, gated to label-mode
+    "res binder",  # PSK resumption binder
+    "ext binder",  # external PSK binder
+    "derived",  # derive-secret root step - short, gated to label-mode
+    "finished",  # finished-key derivation - short, gated to label-mode
 ]
 
 # RFC 5246 TLS 1.2 PRF labels
@@ -48,25 +48,21 @@ TLS12_PRF_LABELS: list[str] = [
 # OpenSSL-family libraries even when stripped.
 OPENSSL_HKDF_HELPERS: list[str] = [
     "tls13_hkdf_expand",
-    "derive_secret",   # common English fragment; gated to --scan-labels
+    "derive_secret",  # common English fragment; gated to --scan-labels
 ]
 
 # Short or high-FP labels that should only appear in --scan-labels mode.
 _LABEL_MODE_ONLY: set[str] = {"tls13 ", "derived", "finished", "derive_secret"}
 
 # Combined: all RFC TLS derivation labels (for raw label scan mode)
-TLS_DERIVATION_LABELS: list[str] = (
-    TLS13_HKDF_LABELS + TLS12_PRF_LABELS + OPENSSL_HKDF_HELPERS
-)
+TLS_DERIVATION_LABELS: list[str] = TLS13_HKDF_LABELS + TLS12_PRF_LABELS + OPENSSL_HKDF_HELPERS
 
 # All TLS string patterns including short/gated labels (used in --scan-labels mode).
 TLS_STRING_PATTERNS: list[str] = _TLS_KEYLOG_PATTERNS + TLS_DERIVATION_LABELS
 
 # Strict subset that excludes short/high-FP labels — used in the default scan mode
 # to keep precision high. Label-mode callers should use TLS_STRING_PATTERNS instead.
-TLS_STRING_PATTERNS_STRICT: list[str] = [
-    s for s in TLS_STRING_PATTERNS if s not in _LABEL_MODE_ONLY
-]
+TLS_STRING_PATTERNS_STRICT: list[str] = [s for s in TLS_STRING_PATTERNS if s not in _LABEL_MODE_ONLY]
 
 # Known TLS library export symbols for library type detection
 TLS_EXPORT_SYMBOLS: dict[str, str] = {

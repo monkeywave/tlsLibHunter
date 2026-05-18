@@ -149,7 +149,11 @@ class MemoryExtractor(Extractor):
             if gap_count > 0:
                 logger.warning(
                     "Partial memory dump for %s: %d/%d bytes readable, %d gap(s) zero-filled (%d bytes)",
-                    library.name, received, expected or size, gap_count, gap_bytes,
+                    library.name,
+                    received,
+                    expected or size,
+                    gap_count,
+                    gap_bytes,
                 )
                 method_name = "memory_dump_partial"
             logger.info("Memory dump: %s -> %s (%d bytes)", library.name, output_path, size)

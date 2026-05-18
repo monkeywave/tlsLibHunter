@@ -770,9 +770,7 @@ class ModuleScanner:
         if self._scan_all_modules or self._scan_everything or self._skipped_hard or self._skipped_heuristic:
             hard_suffix = f": {_summarize_names(self._skipped_hard)}" if self._skipped_hard else ""
             heuristic_hint = (
-                " (use --scan-all-modules to include)"
-                if self._skipped_heuristic and not self._scan_all_modules
-                else ""
+                " (use --scan-all-modules to include)" if self._skipped_heuristic and not self._scan_all_modules else ""
             )
             logger.info(
                 "Coverage: scanned %d/%d modules. Hard-skipped %d%s. Heuristic-skipped %d%s.",

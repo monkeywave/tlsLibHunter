@@ -5,6 +5,7 @@ These tests exercise the scanner's filter logic by constructing a ModuleScanner 
 a mocked backend, then driving _build_hex_pattern_map / __init__ in isolation. They
 do NOT instantiate Frida — no on-device dependency.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock
@@ -29,6 +30,7 @@ def _make_scanner(**kwargs) -> ModuleScanner:
 # ---------------------------------------------------------------------------
 # __init__ accepts the new flags + tracks coverage state
 # ---------------------------------------------------------------------------
+
 
 def test_scanner_default_scan_all_modules_false():
     sc = _make_scanner()
@@ -60,6 +62,7 @@ def test_scanner_initialises_coverage_tracking_lists():
 # ---------------------------------------------------------------------------
 # _build_hex_pattern_map includes the new encoding types
 # ---------------------------------------------------------------------------
+
 
 def test_hex_pattern_map_includes_all_encoding_types_for_long_label():
     """A label >= 6 chars must produce ascii, ascii_nt, utf16le, utf16le_nt,
@@ -93,10 +96,12 @@ def test_hex_pattern_map_dedups_across_labels():
 # _build_hex_patterns uses the broader set when flags are set
 # ---------------------------------------------------------------------------
 
+
 def test_build_hex_patterns_strict_excludes_short_gated_labels():
     """Without flags, the strict pattern source omits 'tls13 ', 'derived', etc."""
     from tlslibhunter.scanner.tls_indicators import TLS_STRING_PATTERNS_STRICT
     from tlslibhunter.utils.encoding import ascii_to_hex
+
     patterns = _build_hex_patterns(TLS_STRING_PATTERNS_STRICT)
     # The ASCII hex form of "tls13 " (with trailing space) must not appear.
     assert ascii_to_hex("tls13 ") not in patterns
@@ -109,6 +114,7 @@ def test_build_hex_patterns_broad_includes_gated_labels():
     flags are set, the call site swaps to this source."""
     from tlslibhunter.scanner.tls_indicators import TLS_STRING_PATTERNS
     from tlslibhunter.utils.encoding import ascii_to_hex
+
     patterns = _build_hex_patterns(TLS_STRING_PATTERNS)
     assert ascii_to_hex("tls13 ") in patterns
     assert ascii_to_hex("derived") in patterns
@@ -119,5 +125,6 @@ def test_pattern_count_bounded():
     With ~6 encodings per label * ~15 labels = ~90 base + reversed chunks.
     Allow generous headroom but catch accidental explosions."""
     from tlslibhunter.scanner.tls_indicators import TLS_STRING_PATTERNS_STRICT
+
     patterns = _build_hex_patterns(TLS_STRING_PATTERNS_STRICT)
     assert len(patterns) < 600, f"Pattern count exploded to {len(patterns)}"

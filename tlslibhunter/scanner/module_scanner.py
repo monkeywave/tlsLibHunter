@@ -253,9 +253,7 @@ _MIN_TLS_MODULE_SIZE = 10 * 1024  # Modules smaller than 10 KB cannot contain a 
 # Encoding strength tiers — encodings from `iter_encodings()` have very different
 # specificity. A full-ASCII match of "SERVER_HANDSHAKE_TRAFFIC_SECRET" is dispositive;
 # a 4-byte reversed chunk of any TLS label is borderline coincidence.
-_STRONG_ENCODINGS: frozenset[str] = frozenset(
-    {"ascii", "ascii_nt", "utf16le", "utf16le_nt", "utf16be"}
-)
+_STRONG_ENCODINGS: frozenset[str] = frozenset({"ascii", "ascii_nt", "utf16le", "utf16le_nt", "utf16be"})
 _MEDIUM_ENCODINGS: frozenset[str] = frozenset({"reversed_chunk_8"})
 _WEAK_ENCODINGS: frozenset[str] = frozenset({"reversed_chunk_4"})
 
@@ -658,9 +656,7 @@ class ModuleScanner:
                         info["library_type"],
                     )
                     if all_pattern_labels:
-                        table = _format_weak_evidence_table(
-                            name, matched_patterns, hex_to_meta, all_pattern_labels
-                        )
+                        table = _format_weak_evidence_table(name, matched_patterns, hex_to_meta, all_pattern_labels)
                         for line in table.splitlines():
                             logger.warning(line)
 

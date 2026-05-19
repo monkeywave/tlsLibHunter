@@ -37,9 +37,7 @@ def _find_hex(hex_to_meta, label: str, enc: str) -> str:
 def test_full_ascii_label_is_high_confidence():
     hex_to_meta = _build_meta()
     full_ascii = _find_hex(hex_to_meta, "CLIENT_RANDOM", "ascii")
-    conf, summary = _classify_evidence(
-        [full_ascii], hex_to_meta, [], False, [], library_type="boringssl"
-    )
+    conf, summary = _classify_evidence([full_ascii], hex_to_meta, [], False, [], library_type="boringssl")
     assert conf == "high"
     assert summary["strong"] == 1
 
@@ -80,9 +78,7 @@ def test_four_chunks_with_two_corroborating_fingerprints_is_medium():
 
 def test_exports_match_is_always_high():
     hex_to_meta = _build_meta()
-    conf, _ = _classify_evidence(
-        [], hex_to_meta, ["SSL_connect", "SSL_new"], False, [], library_type="boringssl"
-    )
+    conf, _ = _classify_evidence([], hex_to_meta, ["SSL_connect", "SSL_new"], False, [], library_type="boringssl")
     assert conf == "high"
 
 

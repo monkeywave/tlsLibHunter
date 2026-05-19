@@ -21,7 +21,11 @@ class PlainFormatter:
         lines.append("")
         for lib in result.libraries:
             lib_display = f"{lib.library_type} ({lib.detected_version})" if lib.detected_version else lib.library_type
-            lines.append(f"  {lib.name} ({lib_display}, {lib.classification}) - {_human_size(lib.size)} - {lib.path}")
+            conf = getattr(lib, "confidence", "high")
+            lines.append(
+                f"  {lib.name} ({lib_display}, {lib.classification}, conf={conf}) "
+                f"- {_human_size(lib.size)} - {lib.path}"
+            )
             if lib.matched_patterns:
                 lines.append(f"    Patterns: {', '.join(lib.matched_patterns)}")
         lines.append("")

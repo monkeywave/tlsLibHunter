@@ -33,15 +33,20 @@ class TableFormatter:
         table.add_column("Library", style="cyan")
         table.add_column("Type", style="green")
         table.add_column("Class", style="yellow")
+        table.add_column("Conf", justify="center")
         table.add_column("Size", justify="right")
         table.add_column("Path", style="dim")
 
+        conf_colors = {"high": "green", "medium": "yellow", "low": "red"}
         for i, lib in enumerate(result.libraries, 1):
+            conf = getattr(lib, "confidence", "high")
+            conf_cell = f"[{conf_colors.get(conf, 'white')}]{conf}[/]"
             table.add_row(
                 str(i),
                 lib.name,
                 f"{lib.library_type} ({lib.detected_version})" if lib.detected_version else lib.library_type,
                 lib.classification,
+                conf_cell,
                 _human_size(lib.size),
                 lib.path,
             )
@@ -57,9 +62,10 @@ class TableFormatter:
         lines.append("=" * 80)
         for i, lib in enumerate(result.libraries, 1):
             lib_display = f"{lib.library_type} ({lib.detected_version})" if lib.detected_version else lib.library_type
+            conf = getattr(lib, "confidence", "high")
             lines.append(
                 f"  {i:>3}. {lib.name:<40s} {lib_display:<25s}"
-                f" {lib.classification:<8s} {_human_size(lib.size):>10s}  {lib.path}"
+                f" {lib.classification:<8s} conf={conf:<6s} {_human_size(lib.size):>10s}  {lib.path}"
             )
         lines.append(f"\nScanned {result.total_modules_scanned} modules in {result.scan_duration_seconds:.2f}s")
         return "\n".join(lines)

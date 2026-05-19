@@ -23,6 +23,8 @@ class DetectedLibrary:
     detected_version: str = ""
     detection_reason: str = ""
     extended_scan_hits: list[dict] = field(default_factory=list)
+    confidence: str = "high"  # high | medium | low
+    evidence_summary: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +40,8 @@ class DetectedLibrary:
             "detected_version": self.detected_version,
             "detection_reason": self.detection_reason,
             "extended_scan_hits": self.extended_scan_hits,
+            "confidence": self.confidence,
+            "evidence_summary": self.evidence_summary,
         }
 
 

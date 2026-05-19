@@ -226,3 +226,18 @@ def get_all_fingerprint_strings() -> list[str]:
                 seen.add(s)
                 result.append(s)
     return result
+
+
+def get_fingerprint_strings_for(library_type: str) -> set[str]:
+    """Return the set of fingerprint strings registered for a given library type.
+
+    Used by evidence classification to count only corroborating fingerprints —
+    e.g. when a module is classified as `boringssl`, a `crypto/tls` (gotls) or
+    `rust_eh_personality` (rust-binary) hit does NOT corroborate the boringssl
+    identification, it just indicates other code is also present.
+    """
+    out: set[str] = set()
+    for fp in LIBRARY_FINGERPRINTS:
+        if fp.library_type == library_type:
+            out.update(fp.fingerprint_strings)
+    return out

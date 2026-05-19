@@ -9,7 +9,11 @@ import time
 from typing import Any
 
 from tlslibhunter.scanner.classifier import ModuleClassifier
-from tlslibhunter.scanner.fingerprints import fingerprint_library, get_all_fingerprint_strings
+from tlslibhunter.scanner.fingerprints import (
+    fingerprint_library,
+    get_all_fingerprint_strings,
+    get_fingerprint_strings_for,
+)
 from tlslibhunter.scanner.results import DetectedLibrary, ScanResult
 from tlslibhunter.scanner.tls_indicators import (
     TLS_DERIVATION_LABELS,
@@ -76,6 +80,34 @@ def _build_hex_pattern_map(strings: list[str]) -> tuple[list[str], dict[str, tup
                 hex_to_label[hex_pat] = (label, enc_type)
 
     return unique, hex_to_label
+
+
+def _build_hex_pattern_map_multi(
+    strings: list[str],
+) -> tuple[list[str], dict[str, list[tuple[str, str]]]]:
+    """Like _build_hex_pattern_map but records ALL (label, encoding) candidates per hex.
+
+    The same 4-byte chunk (e.g. reversed "_TRA") can originate from many TLS
+    labels — CLIENT_TRAFFIC_SECRET_0, SERVER_TRAFFIC_SECRET_0, etc. The lossy
+    1:1 mapping in `_build_hex_pattern_map` hides this multiplicity, which is
+    exactly what evidence classification and the weak-detection diagnostic
+    table need to see.
+    """
+    from tlslibhunter.utils.encoding import iter_encodings
+
+    hex_to_meta: dict[str, list[tuple[str, str]]] = {}
+    unique: list[str] = []
+    for label in strings:
+        for hex_pat, enc_type in iter_encodings(label):
+            if not hex_pat:
+                continue
+            if hex_pat not in hex_to_meta:
+                hex_to_meta[hex_pat] = []
+                unique.append(hex_pat)
+            pair = (label, enc_type)
+            if pair not in hex_to_meta[hex_pat]:
+                hex_to_meta[hex_pat].append(pair)
+    return unique, hex_to_meta
 
 
 def _build_fingerprint_hex_patterns() -> tuple[list[str], dict[str, str]]:
@@ -217,6 +249,156 @@ _TLS_EARLY_EXIT_THRESHOLD = 5  # Stop TLS pattern scan after this many hits
 _FP_EARLY_EXIT_THRESHOLD = 5  # Stop fingerprint scan after this many hits
 _MIN_PATTERN_HITS = 3  # Pattern-only detections need >= N hits without exports/known name
 _MIN_TLS_MODULE_SIZE = 10 * 1024  # Modules smaller than 10 KB cannot contain a TLS implementation
+
+# Encoding strength tiers — encodings from `iter_encodings()` have very different
+# specificity. A full-ASCII match of "SERVER_HANDSHAKE_TRAFFIC_SECRET" is dispositive;
+# a 4-byte reversed chunk of any TLS label is borderline coincidence.
+_STRONG_ENCODINGS: frozenset[str] = frozenset(
+    {"ascii", "ascii_nt", "utf16le", "utf16le_nt", "utf16be"}
+)
+_MEDIUM_ENCODINGS: frozenset[str] = frozenset({"reversed_chunk_8"})
+_WEAK_ENCODINGS: frozenset[str] = frozenset({"reversed_chunk_4"})
+
+
+def _hex_pattern_byte_len(hex_pat: str) -> int:
+    """Return the byte length of a space-separated hex pattern."""
+    return len(hex_pat.split())
+
+
+def _decode_hex_pattern_ascii(hex_pat: str) -> str:
+    """Decode a space-separated hex pattern to printable ASCII (latin1 fallback).
+
+    Used for the weak-evidence diagnostic table — gives a human-readable form
+    of each chunk hit so the user can judge whether it looks TLS-related.
+    """
+    try:
+        raw = bytes.fromhex(hex_pat.replace(" ", ""))
+    except ValueError:
+        return "?"
+    return "".join(c if 32 <= ord(c) < 127 else "." for c in raw.decode("latin1", errors="replace"))
+
+
+def _classify_evidence(
+    matched_hex_patterns: list[str],
+    hex_to_meta: dict[str, list[tuple[str, str]]],
+    matched_exports: list[str],
+    is_known: bool,
+    matched_fingerprints: list[str],
+    library_type: str = "unknown",
+) -> tuple[str, dict[str, int]]:
+    """Classify detection confidence by encoding strength of pattern hits.
+
+    Returns:
+        (confidence, summary) where confidence is "high"/"medium"/"low".
+        summary holds per-tier counts for logging.
+
+    Only fingerprints SPECIFIC to the chosen `library_type` count as
+    corroboration — finding "crypto/tls" (gotls) or "rust_eh_personality"
+    (rust-binary) does NOT corroborate a boringssl identification; it just
+    indicates other code is also present in the binary.
+
+    Rules (most→least specific):
+      - exports OR known-name OR ≥1 strong-encoding hit → high
+      - ≥2 medium-encoding hits → high
+      - ≥1 medium hit + corroborating fingerprint → medium
+      - ≥3 weak hits AND ≥2 distinct corroborating fingerprint strings → medium
+      - otherwise (weak chunks ± a single matching fingerprint) → low
+    """
+    if matched_exports or is_known:
+        return "high", {
+            "strong": 0,
+            "medium": 0,
+            "weak": 0,
+            "fingerprints": len(matched_fingerprints),
+            "corroborating_fingerprints": len(matched_fingerprints),
+        }
+
+    strong = medium = weak = 0
+    for hex_pat in matched_hex_patterns:
+        encs = {enc for _, enc in hex_to_meta.get(hex_pat, [])}
+        if encs & _STRONG_ENCODINGS:
+            strong += 1
+        elif encs & _MEDIUM_ENCODINGS:
+            medium += 1
+        elif encs & _WEAK_ENCODINGS:
+            weak += 1
+        else:
+            # Unknown encoding (shouldn't happen if hex_to_meta is built consistently);
+            # treat conservatively as weak.
+            weak += 1
+
+    # Count only fingerprints that belong to the identified library type.
+    corroborating: set[str] = set()
+    if library_type and library_type != "unknown":
+        lib_fp_set = get_fingerprint_strings_for(library_type)
+        for fp in matched_fingerprints:
+            if fp in lib_fp_set:
+                corroborating.add(fp)
+    n_corroborating = len(corroborating)
+
+    summary = {
+        "strong": strong,
+        "medium": medium,
+        "weak": weak,
+        "fingerprints": len(matched_fingerprints),
+        "corroborating_fingerprints": n_corroborating,
+    }
+
+    if strong >= 1 or medium >= 2:
+        return "high", summary
+    if medium >= 1 and n_corroborating >= 1:
+        return "medium", summary
+    if weak >= 3 and n_corroborating >= 2:
+        return "medium", summary
+    return "low", summary
+
+
+def _format_weak_evidence_table(
+    name: str,
+    matched_hex_patterns: list[str],
+    hex_to_meta: dict[str, list[tuple[str, str]]],
+    all_labels: list[str],
+) -> str:
+    """Build a human-readable evidence table for low-confidence (chunk-only) hits.
+
+    For each 4-byte chunk hit shows:
+      - hex (what the scanner searched for, e.g. "48 5f 52 45")
+      - forward ASCII decode (e.g. "H_RE")
+      - reversed source chunk (e.g. "ER_H" — what a compiler would have loaded)
+      - possible origin TLS labels (substring matches in the indicator set)
+    """
+    header = (
+        f"  Weak-evidence breakdown for {name}\n"
+        f"  {'Hit (hex)':<14} {'Forward':<10} {'Reversed':<10} Possible origin TLS labels"
+    )
+    sep = "  " + "-" * 96
+    body_lines: list[str] = []
+    for hex_pat in matched_hex_patterns:
+        forward = _decode_hex_pattern_ascii(hex_pat)
+        reversed_chunk = forward[::-1]
+        origin_hits: list[str] = []
+        if reversed_chunk and "?" not in reversed_chunk and "." not in reversed_chunk:
+            for label in all_labels:
+                idx = label.find(reversed_chunk)
+                if idx >= 0:
+                    origin_hits.append(f"{label} @ offset {idx}")
+        if not origin_hits:
+            # Fallback to the (label, encoding) candidates we already know
+            origin_hits = [f"{lbl} ({enc})" for lbl, enc in hex_to_meta.get(hex_pat, [])]
+        if len(origin_hits) > 3:
+            origin_str = "; ".join(origin_hits[:3]) + f"  (+{len(origin_hits) - 3} more)"
+        else:
+            origin_str = "; ".join(origin_hits) or "(no TLS label contains this chunk — likely coincidence)"
+        body_lines.append(f"  {hex_pat:<14} {forward:<10} {reversed_chunk:<10} {origin_str}")
+    verdict = (
+        "  Verdict: LOW confidence — all hits are 4-byte reversed chunks. These could "
+        "be coincidental ASCII fragments.\n"
+        "  Likely meaning: this module REFERENCES BoringSSL/TLS (string in .rodata, "
+        "wrapper function, or symbol name) but does\n"
+        "  not contain the TLS implementation itself. Check if it imports SSL_*/EVP_*/HKDF_* "
+        "symbols from another .so."
+    )
+    return "\n".join([header, sep, *body_lines, sep, verdict])
 
 
 class ModuleScanner:
@@ -375,6 +557,8 @@ class ModuleScanner:
         combined: dict,
         fp_hex_to_string: dict[str, str],
         result: ScanResult,
+        hex_to_meta: dict[str, list[tuple[str, str]]] | None = None,
+        all_pattern_labels: list[str] | None = None,
     ) -> None:
         """Process combined scan results for a single module."""
         name = mod.get("name", "")
@@ -388,6 +572,8 @@ class ModuleScanner:
         if tls_matches:
             matched_patterns = [m.get("pattern", "") for m in tls_matches]
             logger.info("Pattern match in %s: %d hits", name, len(tls_matches))
+            for p in matched_patterns:
+                logger.debug("  pattern hit in %s: %r", name, p)
 
         # Require stronger evidence for pattern-only detections
         if matched_patterns and not matched_exports and not is_known and len(matched_patterns) < _MIN_PATTERN_HITS:
@@ -407,6 +593,8 @@ class ModuleScanner:
             fp_matches = combined.get("fpMatches", [])
             if fp_matches:
                 matched_fingerprints = [fp_hex_to_string[h] for h in fp_matches if h in fp_hex_to_string]
+                for fs in matched_fingerprints:
+                    logger.debug("  fingerprint hit in %s: %r", name, fs)
                 fingerprint_type, detected_version = fingerprint_library(matched_fingerprints)
 
             info = self._classifier.classify_module(
@@ -441,6 +629,41 @@ class ModuleScanner:
                 reasons.append("export")
             if is_known:
                 reasons.append("known_name")
+
+            # Encoding-weighted confidence: a "5 hits" detection where all 5 are
+            # 4-byte reversed chunks (the weakest encoding from iter_encodings)
+            # is borderline coincidence — surface that as low confidence and emit
+            # a diagnostic table the user can inspect, instead of treating it
+            # the same as a full-ASCII keylog-label hit.
+            confidence = "high"
+            evidence_summary: dict[str, int] = {}
+            if hex_to_meta is not None:
+                confidence, evidence_summary = _classify_evidence(
+                    matched_patterns,
+                    hex_to_meta,
+                    matched_exports,
+                    is_known,
+                    matched_fingerprints,
+                    library_type=info["library_type"],
+                )
+                if confidence == "low":
+                    logger.warning(
+                        "Weak evidence for %s: %d 4-byte chunk hit(s), %d total fingerprint(s) "
+                        "of which %d corroborate %s; this module may REFERENCE TLS code "
+                        "rather than implement it",
+                        name,
+                        evidence_summary.get("weak", 0),
+                        evidence_summary.get("fingerprints", 0),
+                        evidence_summary.get("corroborating_fingerprints", 0),
+                        info["library_type"],
+                    )
+                    if all_pattern_labels:
+                        table = _format_weak_evidence_table(
+                            name, matched_patterns, hex_to_meta, all_pattern_labels
+                        )
+                        for line in table.splitlines():
+                            logger.warning(line)
+
             lib = DetectedLibrary(
                 name=name,
                 path=path,
@@ -453,9 +676,18 @@ class ModuleScanner:
                 matched_fingerprints=matched_fingerprints,
                 detected_version=info.get("detected_version", ""),
                 detection_reason="+".join(reasons),
+                confidence=confidence,
+                evidence_summary=evidence_summary,
             )
             result.libraries.append(lib)
-            logger.info("Detected: %s (%s, %s)", name, info["library_type"], info["classification"])
+            confidence_tag = "" if confidence == "high" else f" [confidence={confidence}]"
+            logger.info(
+                "Detected: %s (%s, %s)%s",
+                name,
+                info["library_type"],
+                info["classification"],
+                confidence_tag,
+            )
 
         # Split constants
         split_matches = combined.get("splitMatches", [])
@@ -677,7 +909,9 @@ class ModuleScanner:
             pattern_source = TLS_STRING_PATTERNS
         else:
             pattern_source = TLS_STRING_PATTERNS_STRICT
-        hex_patterns = _build_hex_patterns(pattern_source)
+        # Use the multi-candidate map so each hit can be classified by encoding strength
+        # (and so the weak-evidence diagnostic table can list all possible origin labels).
+        hex_patterns, tls_hex_to_meta = _build_hex_pattern_map_multi(pattern_source)
         fp_hex_patterns, fp_hex_to_string = _build_fingerprint_hex_patterns()
 
         source_strings = pattern_source
@@ -742,6 +976,8 @@ class ModuleScanner:
                 combined,
                 fp_hex_to_string,
                 result,
+                hex_to_meta=tls_hex_to_meta,
+                all_pattern_labels=pattern_source,
             )
 
         # Pipeline stats

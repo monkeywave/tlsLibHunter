@@ -230,6 +230,36 @@ def _match_known_library(name: str) -> str | None:
     return _EXACT_LOOKUP.get(stem) or _STEM_LOOKUP.get(stem)
 
 
+# Crypto-primitive / JNI-wrapper libraries that carry TLS-ish strings (and even
+# re-export SSL_* symbols), but are NOT independently hookable TLS stacks for
+# key extraction. The real targets are the SSL/TLS-protocol libraries
+# (libssl.so, libcronet*, stable_cronet_libssl.so). These are excluded from the
+# default scan and only surface with --scan-everything.
+KNOWN_FALSE_POSITIVE_STEMS: frozenset[str] = frozenset(
+    {
+        "libcrypto",  # BoringSSL/OpenSSL primitives (also matches stable_cronet_libcrypto.so)
+        "libjavacrypto",  # Conscrypt JNI bridge
+    }
+)
+
+
+def is_known_false_positive(name: str) -> bool:
+    """Check if a module is a known non-TLS-stack false positive.
+
+    Matches crypto-primitive / JNI-wrapper libraries (libcrypto, libjavacrypto)
+    by stem suffix so prefixed variants like ``stable_cronet_libcrypto.so`` are
+    caught while genuine TLS stacks (libssl, libcronet) are not.
+
+    Args:
+        name: Library filename (e.g., "stable_cronet_libcrypto.so")
+
+    Returns:
+        True if the module is a known false positive.
+    """
+    stem = _extract_stem(name)
+    return any(stem.endswith(fp) for fp in KNOWN_FALSE_POSITIVE_STEMS)
+
+
 def identify_library_type(
     name: str,
     matched_exports: list[str] | None = None,

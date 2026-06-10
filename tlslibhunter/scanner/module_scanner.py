@@ -20,6 +20,7 @@ from tlslibhunter.scanner.tls_indicators import (
     TLS_EXPORT_SYMBOLS,
     TLS_STRING_PATTERNS,
     TLS_STRING_PATTERNS_STRICT,
+    is_known_false_positive,
     is_known_tls_library,
 )
 from tlslibhunter.utils.encoding import build_scan_patterns
@@ -249,6 +250,10 @@ _TLS_EARLY_EXIT_THRESHOLD = 5  # Stop TLS pattern scan after this many hits
 _FP_EARLY_EXIT_THRESHOLD = 5  # Stop fingerprint scan after this many hits
 _MIN_PATTERN_HITS = 3  # Pattern-only detections need >= N hits without exports/known name
 _MIN_TLS_MODULE_SIZE = 10 * 1024  # Modules smaller than 10 KB cannot contain a TLS implementation
+# Defense-in-depth: if the target process dies mid-scan, re-spawn and bisect to
+# isolate the offending module. High enough to bisect one offender out of a few
+# hundred modules (~log2(N) re-attaches), bounded to prevent a re-spawn storm.
+_MAX_REATTACHES = 12
 
 # Encoding strength tiers — encodings from `iter_encodings()` have very different
 # specificity. A full-ASCII match of "SERVER_HANDSHAKE_TRAFFIC_SECRET" is dispositive;
@@ -416,6 +421,9 @@ class ModuleScanner:
         scan_encoded_strings: bool = False,
         scan_all_modules: bool = False,
         scan_everything: bool = False,
+        device: Any = None,
+        respawn_target: str | None = None,
+        spawn_mode: bool = False,
     ):
         self._backend = backend
         self._session = session
@@ -434,14 +442,187 @@ class ModuleScanner:
         # Coverage tracking populated during scan() — surfaced in pipeline_stats.
         self._skipped_hard: list[str] = []
         self._skipped_heuristic: list[str] = []
+        self._skipped_false_positive: list[str] = []
+        # Process-death resilience (defense-in-depth; normal path never touches it).
+        self._device = device
+        self._respawn_target = respawn_target
+        self._spawn_mode = spawn_mode
+        self._excluded_modules: set[str] = set()
+        self._detach_info: dict = {"detached": False, "reason": None, "crash": None}
+        self._reattach_count = 0
+        self._closing = False  # set during cleanup() so our own detach isn't a "crash"
+        self._unrecoverable_message: str | None = None
 
     def _ensure_script(self) -> None:
         """Load the scanner script if not already loaded."""
         if self._script is not None:
             return
         js_source = _load_scanner_js()
-        self._script = self._backend.create_script(self._session, js_source)
+        # Register a detach handler on the session so a process death is detected
+        # cleanly instead of surfacing as a cascade of opaque RPC errors.
+        with contextlib.suppress(Exception):
+            self._backend.set_detached_callback(self._session, self._on_detached)
+        self._script = self._backend.create_script(
+            self._session,
+            js_source,
+            on_script_destroyed=self._on_script_destroyed,
+        )
         self._exports = getattr(self._script, "exports_sync", None) or getattr(self._script, "exports", None)
+
+    # ------------------------------------------------------------------
+    # Process-death detection & recovery (defense-in-depth)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _module_name(item: Any) -> str:
+        """Module name from either a Frida module dict or a scan config dict."""
+        return item.get("name", "") if isinstance(item, dict) else ""
+
+    def _on_detached(self, reason: str | None = None, *rest: Any) -> None:
+        """Frida session 'detached' handler: cb(reason, crash)."""
+        if self._closing or reason == "application-requested":
+            return  # our own teardown, not a crash
+        self._detach_info = {
+            "detached": True,
+            "reason": reason,
+            "crash": rest[0] if rest else None,
+        }
+        logger.warning("Session detached: %s", reason or "unknown")
+
+    def _on_script_destroyed(self) -> None:
+        """Frida script 'destroyed' handler: cb()."""
+        if self._closing:
+            return
+        if not self._detach_info.get("detached"):
+            self._detach_info = {"detached": True, "reason": "script-destroyed", "crash": None}
+
+    def _is_process_death(self, exc: Exception) -> bool:
+        """True if an RPC failure was caused by the target process/script dying."""
+        if self._detach_info.get("detached") and self._detach_info.get("reason") != "application-requested":
+            return True
+        msg = str(exc).lower()
+        return (
+            "script has been destroyed" in msg
+            or "script is destroyed" in msg
+            or "session is detached" in msg
+            or "process not found" in msg
+            or "process not responding" in msg
+        )
+
+    def _can_reattach(self) -> bool:
+        """Auto-recovery is only feasible in spawn mode (attach mode: PID is gone)."""
+        return bool(
+            self._spawn_mode
+            and self._device is not None
+            and self._respawn_target
+            and self._reattach_count < _MAX_REATTACHES
+        )
+
+    def _reattach(self) -> bool:
+        """Re-spawn the target and reload the script. Returns True on success."""
+        if not self._can_reattach():
+            return False
+        self._reattach_count += 1
+        logger.info(
+            "Re-spawning '%s' to recover (attempt %d/%d)...",
+            self._respawn_target,
+            self._reattach_count,
+            _MAX_REATTACHES,
+        )
+        # Drop the dead script/session without tripping our own detach handler.
+        self._closing = True
+        with contextlib.suppress(Exception):
+            self.cleanup()
+        self._closing = False
+        self._detach_info = {"detached": False, "reason": None, "crash": None}
+        try:
+            self._session = self._backend.spawn(
+                self._device,
+                self._respawn_target,
+                on_detached=self._on_detached,
+            )
+            self._script = None
+            self._exports = None
+            self._ensure_script()
+            return True
+        except Exception as e:
+            logger.error("Re-spawn failed: %s", e)
+            return False
+
+    def _run_resilient(self, label: str, items: list, run, empty_factory, merge):
+        """Run a batch RPC over ``items`` with process-death recovery.
+
+        ``run(subset)`` performs the actual RPC on a subset and returns its
+        result; it may raise. On an ordinary (non-death) error this re-raises so
+        the caller's existing fallback handles it. On a detected process death it
+        re-attaches (spawn mode) and bisects ``items`` to isolate the offending
+        module, which is added to ``self._excluded_modules`` and skipped.
+        """
+        items = [it for it in items if self._module_name(it) not in self._excluded_modules]
+        try:
+            return run(items)
+        except Exception as e:
+            if not self._is_process_death(e):
+                raise
+        logger.error(
+            "Target process died during %s (%s). Attempting recovery...",
+            label,
+            self._detach_info.get("reason") or "script destroyed",
+        )
+        return self._recover_bisect(label, items, run, empty_factory, merge)
+
+    def _recover_bisect(self, label: str, items: list, run, empty_factory, merge):
+        """Bisect ``items`` across re-spawns to isolate process-killing modules."""
+        result = empty_factory()
+        queue: list[list] = [list(items)]
+        need_reattach = True  # we just observed a death
+        while queue:
+            chunk = [it for it in queue.pop(0) if self._module_name(it) not in self._excluded_modules]
+            if not chunk:
+                continue
+            if need_reattach:
+                if not self._reattach():
+                    self._record_unrecoverable(label, chunk)
+                    return result
+                need_reattach = False
+            try:
+                result = merge(result, run(chunk))
+            except Exception as e:
+                is_death = self._is_process_death(e)
+                if len(chunk) > 1:
+                    # Narrow down which module(s) are responsible by re-queueing the
+                    # halves. This isolates the offender without dropping the rest of
+                    # the chunk — whether the failure killed the process (death) or was
+                    # a transient per-batch error (non-death). Only a process death
+                    # requires re-spawning before the halves can run.
+                    mid = len(chunk) // 2
+                    queue[:0] = [chunk[:mid], chunk[mid:]]  # process left half first
+                    if is_death:
+                        need_reattach = True
+                elif is_death:
+                    victim = self._module_name(chunk[0])
+                    self._excluded_modules.add(victim)
+                    logger.error("Excluded offending module after crash: %s", victim)
+                    need_reattach = True
+                else:
+                    logger.debug(
+                        "%s: non-fatal error on %s, skipping: %s", label, self._module_name(chunk[0]), e
+                    )
+        return result
+
+    def _record_unrecoverable(self, label: str, pending: list) -> None:
+        """Emit a single clean message when recovery is impossible/exhausted."""
+        reason = self._detach_info.get("reason") or "script destroyed"
+        if not self._spawn_mode:
+            hint = "Re-attach is not possible in attach mode (the process is gone). Relaunch the app and re-run."
+        else:
+            hint = f"Recovery exhausted after {self._reattach_count} re-spawn(s)."
+        excluded = sorted(self._excluded_modules)
+        excluded_str = f" Excluded so far: {excluded}." if excluded else ""
+        self._unrecoverable_message = (
+            f"Scan stopped: target process died during {label} ({reason}); "
+            f"{len(pending)} module(s) not scanned. {hint}{excluded_str}"
+        )
+        logger.error(self._unrecoverable_message)
 
     def _deduplicate_modules(self, modules: list[dict]) -> list[dict]:
         """Remove duplicate modules loaded at multiple addresses."""
@@ -529,6 +710,7 @@ class ModuleScanner:
             scanned,
             result.scan_duration_seconds,
         )
+        self._apply_default_result_filters(result)
         return result
 
     def _build_per_module_opts(
@@ -644,7 +826,11 @@ class ModuleScanner:
                     matched_fingerprints,
                     library_type=info["library_type"],
                 )
-                if confidence == "low":
+                # The verbose weak-evidence breakdown is only useful when the
+                # low-confidence row will actually be shown (--scan-everything)
+                # or when debugging (-d); otherwise it just floods a default run
+                # that already hides these detections.
+                if confidence == "low" and (self._scan_everything or logger.isEnabledFor(logging.DEBUG)):
                     logger.warning(
                         "Weak evidence for %s: %d 4-byte chunk hit(s), %d total fingerprint(s) "
                         "of which %d corroborate %s; this module may REFERENCE TLS code "
@@ -788,6 +974,15 @@ class ModuleScanner:
                 stage1_candidates.append(mod)
                 continue
 
+            # Known false positives: crypto-primitive / JNI-wrapper libs that
+            # carry TLS strings but are not hookable TLS stacks. Skipped by
+            # default; --scan-everything includes them.
+            if not self._scan_everything and is_known_false_positive(name):
+                self._skipped_false_positive.append(name)
+                if self._scan_all_modules:
+                    logger.info("SKIP (known false positive) %s", name)
+                continue
+
             if not self._classifier.is_tls_candidate(name, path):
                 if not force_scan:
                     self._skipped_heuristic.append(name)
@@ -832,15 +1027,23 @@ class ModuleScanner:
         no_exports = []
 
         if unknown_modules:
-            unknown_names = [m.get("name", "") for m in unknown_modules]
+
+            def _run_exports(subset):
+                names = [m.get("name", "") for m in subset]
+                return self._exports.batch_check_exports(names, export_symbols)
+
             try:
-                export_results = self._exports.batch_check_exports(unknown_names, export_symbols)
+                export_results = self._run_resilient(
+                    "export check", unknown_modules, _run_exports, dict, lambda a, b: {**a, **b}
+                )
             except Exception as e:
                 logger.debug("Batch export check error: %s, falling back to individual checks", e)
                 export_results = {}
 
             for mod in unknown_modules:
                 name = mod.get("name", "")
+                if name in self._excluded_modules:
+                    continue
                 found = export_results.get(name, [])
                 if found:
                     module_meta[name] = (False, found)
@@ -868,8 +1071,15 @@ class ModuleScanner:
         if no_exports:
             probe_patterns = _build_probe_patterns()
             probe_names = [m.get("name", "") for m in no_exports]
+
+            def _run_probe(subset):
+                names = [m.get("name", "") for m in subset]
+                return self._exports.batch_probe_modules(names, probe_patterns)
+
             try:
-                probe_hits = self._exports.batch_probe_modules(probe_names, probe_patterns)
+                probe_hits = self._run_resilient(
+                    "TLS probe", no_exports, _run_probe, list, lambda a, b: a + b
+                )
             except Exception as e:
                 logger.debug("Batch probe error: %s, including all remaining as candidates", e)
                 probe_hits = probe_names  # Fail-safe: include all
@@ -933,6 +1143,8 @@ class ModuleScanner:
         module_configs = []
         for mod in all_confirmed:
             name = mod.get("name", "")
+            if name in self._excluded_modules:
+                continue
             is_known, matched_exports = module_meta.get(name, (False, []))
             per_mod_opts = self._build_per_module_opts(
                 is_known,
@@ -941,16 +1153,20 @@ class ModuleScanner:
             )
             module_configs.append({"name": name, "opts": per_mod_opts})
 
+        def _run_scan(subset):
+            return self._exports.batch_scan_modules_combined(subset, base_scan_opts)
+
         batch_results: dict = {}
         try:
-            batch_results = self._exports.batch_scan_modules_combined(
-                module_configs,
-                base_scan_opts,
+            batch_results = self._run_resilient(
+                "detailed scan", module_configs, _run_scan, dict, lambda a, b: {**a, **b}
             )
         except Exception as e:
             logger.debug("Batch scan error: %s, falling back to sequential scan", e)
             # Fallback: scan modules individually (merge shared + per-module opts)
             for cfg in module_configs:
+                if cfg["name"] in self._excluded_modules:
+                    continue
                 merged = dict(base_scan_opts)
                 merged.update(cfg["opts"])
                 try:
@@ -959,10 +1175,15 @@ class ModuleScanner:
                         merged,
                     )
                 except Exception as e2:
+                    if self._is_process_death(e2):
+                        logger.error("Target process died during sequential scan; stopping further scans.")
+                        break
                     logger.debug("Combined scan error for %s: %s", cfg["name"], e2)
 
         for mod in all_confirmed:
             name = mod.get("name", "")
+            if name in self._excluded_modules:
+                continue
             is_known, matched_exports = module_meta.get(name, (False, []))
             combined = batch_results.get(name, {})
             self._process_scan_result(
@@ -989,9 +1210,22 @@ class ModuleScanner:
             "scan_everything_enabled": self._scan_everything,
             "hard_skipped_names": self._skipped_hard,
             "heuristic_skipped_names": self._skipped_heuristic,
+            "false_positive_skipped_names": self._skipped_false_positive,
+            "excluded_modules": sorted(self._excluded_modules),
+            "reattach_count": self._reattach_count,
         }
         result.total_modules_scanned = len(all_confirmed)
         result.scan_duration_seconds = time.time() - start_time
+
+        # Surface a single clean message if the process died and recovery was
+        # impossible/exhausted (replaces the old per-module error cascade).
+        if self._unrecoverable_message and self._unrecoverable_message not in result.errors:
+            result.errors.append(self._unrecoverable_message)
+        elif self._excluded_modules:
+            result.errors.append(
+                f"Recovered from {self._reattach_count} process death(s); "
+                f"excluded offending module(s): {sorted(self._excluded_modules)}"
+            )
 
         logger.info(
             "Scan complete: %d TLS libraries found in %d modules (%.2fs)",
@@ -999,19 +1233,32 @@ class ModuleScanner:
             len(all_confirmed),
             result.scan_duration_seconds,
         )
-        if self._scan_all_modules or self._scan_everything or self._skipped_hard or self._skipped_heuristic:
+        if (
+            self._scan_all_modules
+            or self._scan_everything
+            or self._skipped_hard
+            or self._skipped_heuristic
+            or self._skipped_false_positive
+        ):
             hard_suffix = f": {_summarize_names(self._skipped_hard)}" if self._skipped_hard else ""
             heuristic_hint = (
                 " (use --scan-all-modules to include)" if self._skipped_heuristic and not self._scan_all_modules else ""
             )
+            fp_suffix = (
+                f" False-positive-skipped {len(self._skipped_false_positive)}"
+                f": {_summarize_names(self._skipped_false_positive)} (use --scan-everything to include)."
+                if self._skipped_false_positive
+                else ""
+            )
             logger.info(
-                "Coverage: scanned %d/%d modules. Hard-skipped %d%s. Heuristic-skipped %d%s.",
+                "Coverage: scanned %d/%d modules. Hard-skipped %d%s. Heuristic-skipped %d%s.%s",
                 len(stage1_candidates),
                 deduped_count,
                 len(self._skipped_hard),
                 hard_suffix,
                 len(self._skipped_heuristic),
                 heuristic_hint,
+                fp_suffix,
             )
 
         # RWX region scan
@@ -1076,10 +1323,46 @@ class ModuleScanner:
             except Exception as e:
                 logger.debug("Stack memory scan error: %s", e)
 
+        self._apply_default_result_filters(result)
         return result
+
+    def _apply_default_result_filters(self, result: ScanResult) -> None:
+        """Hide low-confidence and known-false-positive detections by default.
+
+        Keeps only medium/high-confidence, genuine TLS-stack detections in the
+        result so the table / json / plain output and extraction all share one
+        filtered view. ``--scan-everything`` disables the filter and yields the
+        full raw set. Hidden names are recorded in ``pipeline_stats`` so nothing
+        is silently lost.
+        """
+        if self._scan_everything:
+            return
+
+        hidden_low: list[str] = []
+        hidden_fp: list[str] = []
+        keep: list[DetectedLibrary] = []
+        for lib in result.libraries:
+            if is_known_false_positive(lib.name):
+                hidden_fp.append(lib.name)
+            elif getattr(lib, "confidence", "high") == "low":
+                hidden_low.append(lib.name)
+            else:
+                keep.append(lib)
+
+        result.libraries = keep
+        result.pipeline_stats["hidden_low_confidence_names"] = hidden_low
+        result.pipeline_stats["hidden_false_positive_names"] = hidden_fp
+        if hidden_low or hidden_fp:
+            logger.info(
+                "Hidden %d low-confidence + %d known-false-positive detection(s) from results; "
+                "use --scan-everything to show.",
+                len(hidden_low),
+                len(hidden_fp),
+            )
 
     def cleanup(self) -> None:
         """Unload the scanner script."""
+        self._closing = True  # our own unload/detach is not a crash
         if self._script:
             with contextlib.suppress(Exception):
                 self._script.unload()

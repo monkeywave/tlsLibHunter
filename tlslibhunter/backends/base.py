@@ -56,13 +56,21 @@ class Backend(abc.ABC):
         """
 
     @abc.abstractmethod
-    def attach(self, device: Any, target: str | int, timeout: int = 10) -> Any:
+    def attach(
+        self,
+        device: Any,
+        target: str | int,
+        timeout: int = 10,
+        on_detached: Callable | None = None,
+    ) -> Any:
         """Attach to a running process.
 
         Args:
             device: Device handle from get_device().
             target: Process name (str) or PID (int).
             timeout: Attachment timeout in seconds.
+            on_detached: Optional callback invoked when the session detaches
+                (e.g. the target process dies). Signature: ``cb(reason, crash)``.
 
         Returns:
             Session handle.
@@ -73,13 +81,21 @@ class Backend(abc.ABC):
         """
 
     @abc.abstractmethod
-    def spawn(self, device: Any, target: str, timeout: int = 10) -> Any:
+    def spawn(
+        self,
+        device: Any,
+        target: str,
+        timeout: int = 10,
+        on_detached: Callable | None = None,
+    ) -> Any:
         """Spawn a process and attach.
 
         Args:
             device: Device handle from get_device().
             target: Process/package name to spawn.
             timeout: Spawn timeout in seconds.
+            on_detached: Optional callback invoked when the session detaches.
+                Signature: ``cb(reason, crash)``.
 
         Returns:
             Session handle.
@@ -94,6 +110,7 @@ class Backend(abc.ABC):
         session: Any,
         source: str,
         on_message: Callable | None = None,
+        on_script_destroyed: Callable | None = None,
     ) -> Any:
         """Create and load an instrumentation script.
 
@@ -101,6 +118,8 @@ class Backend(abc.ABC):
             session: Session handle from attach() or spawn().
             source: JavaScript source code.
             on_message: Optional message handler callback.
+            on_script_destroyed: Optional callback invoked when the script is
+                destroyed (e.g. the process died). Signature: ``cb()``.
 
         Returns:
             Script handle with exports accessible.
@@ -108,6 +127,18 @@ class Backend(abc.ABC):
         Raises:
             ScriptError: If script fails to load.
         """
+
+    def set_detached_callback(self, session: Any, callback: Callable) -> None:
+        """Register a detach callback on an already-attached session.
+
+        Default no-op for backends without session detach signals. Backends that
+        support it (Frida) override this to wire ``session.on("detached", cb)``.
+
+        Args:
+            session: Session handle from attach() or spawn().
+            callback: Invoked when the session detaches. Signature: ``cb(reason, crash)``.
+        """
+        return None
 
     @abc.abstractmethod
     def detach(self, session: Any) -> None:

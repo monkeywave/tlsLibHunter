@@ -4,9 +4,57 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
+from datetime import datetime
 
 from tlslibhunter.about import __version__
+
+# Matches ANSI escape sequences (colors, cursor moves) so the debug log file
+# captures clean, greppable text rather than terminal control codes.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+class _TeeStream:
+    """Write-through stream that mirrors output to a log file (ANSI stripped).
+
+    Wraps the real stdout/stderr so everything the user sees in the terminal is
+    also persisted to the debug log. Unknown attributes (isatty, encoding,
+    fileno, …) proxy to the original stream so Rich and friends behave normally.
+    """
+
+    def __init__(self, original, log_fh):
+        self._original = original
+        self._log = log_fh
+
+    def write(self, s: str) -> int:
+        self._original.write(s)
+        self._log.write(_ANSI_RE.sub("", s))
+        return len(s)
+
+    def flush(self) -> None:
+        self._original.flush()
+        self._log.flush()
+
+    def __getattr__(self, attr):
+        return getattr(self._original, attr)
+
+
+def _setup_debug_log_file(target: str) -> str | None:
+    """Tee stdout/stderr into a timestamped log file in the cwd.
+
+    Returns the log path, or None if the file could not be opened.
+    """
+    safe_target = str(target).replace("/", "_").replace("\\", "_")
+    log_path = f"tlslibhunter_{safe_target}_{datetime.now():%Y%m%d-%H%M%S}.log"
+    try:
+        log_fh = open(log_path, "w", encoding="utf-8")  # noqa: SIM115 (kept open for process lifetime)
+    except OSError as e:
+        print(f"Warning: could not open debug log file '{log_path}': {e}", file=sys.stderr)
+        return None
+    sys.stdout = _TeeStream(sys.stdout, log_fh)
+    sys.stderr = _TeeStream(sys.stderr, log_fh)
+    return log_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,7 +147,14 @@ def _setup_logging(debug: bool = False) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Tee terminal output to a log file before logging is configured, so the
+    # logging StreamHandler binds the teed stderr and the file captures both the
+    # rendered table (stdout) and all log records (stderr).
+    log_path = _setup_debug_log_file(args.target) if args.debug else None
     _setup_logging(args.debug)
+    if log_path:
+        logging.getLogger("tlslibhunter").info("Debug log: %s", log_path)
 
     from tlslibhunter.config import HunterConfig
     from tlslibhunter.hunter import TLSLibHunter

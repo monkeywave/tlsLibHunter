@@ -1,5 +1,112 @@
 'use strict';
 
+// --- Tuning constants ---
+// Giant/obfuscated native libs (cronet, webview, monochrome, mapbox, llvm) are
+// scanned in bounded windows rather than in one unbounded pass. We never
+// deny-list them: they may statically link a renamed TLS library.
+var SCAN_CHUNK_SIZE = 48 * 1024 * 1024;     // 48 MB scan window
+var MAX_WRITABLE_RANGE = 64 * 1024 * 1024;  // cap for writable (heap/stack) ranges
+var SCAN_TIMEOUT_MS = 120000;               // safety net so a hung native scan can't deadlock the RPC
+
+/**
+ * Targeted export presence check. Replaces full Module.enumerateExports() walks,
+ * which on Android can SIGSEGV the target process when a module is APK-embedded
+ * or giant and the linker leaves PROT_NONE gaps between PT_LOAD segments
+ * (frida-gum PR #1094 / issue #1099). findExportByName performs a bounded
+ * lookup, touching far less memory, and any per-module resolution fault is
+ * contained by the try/catch instead of killing the process.
+ *
+ * @param {Module} m - Module instance (from Process.findModuleByName)
+ * @param {string} symbolName - Export symbol to look up
+ * @returns {boolean} true if the symbol is an export of the module
+ */
+function lookupExport(m, symbolName) {
+  try {
+    var p = m.findExportByName(symbolName);  // frida 17.x instance method, null on miss
+    return p !== null && !p.isNull();
+  } catch (e) {
+    return false;  // resolution fault on a malformed module -> treat as "not present"
+  }
+}
+
+/**
+ * Scan a single (base, size) for one pattern, chunking ranges larger than
+ * SCAN_CHUNK_SIZE so giant libraries are scanned bounded rather than in one
+ * unbounded pass. Uses async Memory.scan; onError skips a faulting sub-range
+ * but the overall Promise ALWAYS resolves (never rejects) so callers can await
+ * without per-call try/catch.
+ *
+ * @param {NativePointer} base
+ * @param {number|UInt64} size
+ * @param {string} pattern - hex/Memory.scan match pattern
+ * @param {Object} [opts]
+ * @param {number} [opts.stopAfter=0] - resolve early once this many matches are
+ *   collected (0 = unlimited). Mirrors the old "one match per range is enough".
+ * @returns {Promise<Object[]>} resolves to [{address: NativePointer, size: Number}]
+ */
+function scanRange(base, size, pattern, opts) {
+  opts = opts || {};
+  var stopAfter = opts.stopAfter || 0;
+
+  return new Promise(function (resolve) {
+    var matches = [];
+    var remaining = (typeof size === 'number') ? size : size.toNumber();
+    var cursor = base;
+    var settled = false;
+
+    var timer = setTimeout(function () {
+      if (!settled) { settled = true; resolve(matches); }
+    }, SCAN_TIMEOUT_MS);
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(matches);
+    }
+
+    function scanNextChunk() {
+      if (settled) return;
+      if (remaining <= 0) { finish(); return; }
+      if (stopAfter > 0 && matches.length >= stopAfter) { finish(); return; }
+
+      var chunkSize = remaining > SCAN_CHUNK_SIZE ? SCAN_CHUNK_SIZE : remaining;
+      var chunkBase = cursor;
+      cursor = cursor.add(chunkSize);  // NativePointer arithmetic; chunkSize <= 48 MB
+      remaining -= chunkSize;
+
+      Memory.scan(chunkBase, chunkSize, pattern, {
+        onMatch: function (address, matchSize) {
+          matches.push({ address: address, size: matchSize });
+          if (stopAfter > 0 && matches.length >= stopAfter) {
+            return 'stop';  // cancel this chunk early
+          }
+        },
+        onError: function (reason) {
+          // Bad sub-range (PROT_NONE gap, race with unmap, SIGBUS-backed page):
+          // skip it and continue with the next chunk via onComplete.
+        },
+        onComplete: function () {
+          // onComplete fires after any onError(s); always advance.
+          scanNextChunk();
+        }
+      });
+    }
+
+    scanNextChunk();
+  });
+}
+
+/**
+ * Convenience: resolve to true if the pattern occurs at least once in the range.
+ * @returns {Promise<boolean>}
+ */
+function scanRangeHasMatch(base, size, pattern) {
+  return scanRange(base, size, pattern, { stopAfter: 1 }).then(function (m) {
+    return m.length > 0;
+  });
+}
+
 rpc.exports = {
   /**
    * Enumerate all loaded modules in the process.
@@ -26,10 +133,10 @@ rpc.exports = {
    * which bypasses issues with standard module-range enumeration.
    *
    * @param {string} moduleName - Name of the module to scan
-   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scanSync
+   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scan
    * @returns {Object[]} Array of match objects with pattern, address, offset, protection, occurrences
    */
-  scanModuleKernelLevel: function(moduleName, hexPatterns) {
+  scanModuleKernelLevel: async function(moduleName, hexPatterns) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
@@ -44,21 +151,17 @@ rpc.exports = {
     for (var r = 0; r < moduleRanges.length; r++) {
       var range = moduleRanges[r];
       for (var p = 0; p < hexPatterns.length; p++) {
-        try {
-          var results = Memory.scanSync(range.base, range.size, hexPatterns[p]);
-          if (results && results.length > 0) {
-            found.push({
-              pattern: hexPatterns[p],
-              address: results[0].address.toString(),
-              offset: results[0].address.sub(m.base).toString(),
-              protection: range.protection,
-              occurrences: results.length
-            });
-            // One match per range is enough to identify the module
-            break;
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var results = await scanRange(range.base, range.size, hexPatterns[p], { stopAfter: 1 });
+        if (results.length > 0) {
+          found.push({
+            pattern: hexPatterns[p],
+            address: results[0].address.toString(),
+            offset: results[0].address.sub(m.base).toString(),
+            protection: range.protection,
+            occurrences: results.length
+          });
+          // One match per range is enough to identify the module
+          break;
         }
       }
     }
@@ -69,7 +172,7 @@ rpc.exports = {
    * Standard module scan (fallback / simpler approach).
    * Uses module base + size directly instead of kernel memory maps.
    */
-  scanModuleForPatterns: function(moduleName, patterns) {
+  scanModuleForPatterns: async function(moduleName, patterns) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
@@ -77,13 +180,9 @@ rpc.exports = {
     var found = [];
     for (var i = 0; i < patterns.length; i++) {
       var pat = patterns[i];
-      try {
-        var res = Memory.scanSync(m.base, m.size, pat);
-        if (res && res.length > 0) {
-          found.push({ pattern: pat, occurrences: res.length });
-        }
-      } catch (e) {
-        // skip pattern or region read errors
+      var res = await scanRange(m.base, m.size, pat);
+      if (res.length > 0) {
+        found.push({ pattern: pat, occurrences: res.length });
       }
     }
     return found;
@@ -102,14 +201,10 @@ rpc.exports = {
     if (!m) {
       return [];
     }
+    // Targeted lookups instead of a full enumerateExports() walk (see lookupExport).
     var found = [];
-    var exports = m.enumerateExports();
-    var exportSet = {};
-    for (var i = 0; i < exports.length; i++) {
-      exportSet[exports[i].name] = true;
-    }
     for (var j = 0; j < symbolNames.length; j++) {
-      if (exportSet[symbolNames[j]]) {
+      if (lookupExport(m, symbolNames[j])) {
         found.push(symbolNames[j]);
       }
     }
@@ -125,20 +220,17 @@ rpc.exports = {
    * @returns {Object} Map of {moduleName: [foundSymbols]} (only modules with matches)
    */
   batchCheckExports: function(moduleNames, symbolNames) {
-    var symbolSet = {};
-    for (var j = 0; j < symbolNames.length; j++) {
-      symbolSet[symbolNames[j]] = true;
-    }
     var results = {};
     for (var i = 0; i < moduleNames.length; i++) {
       var modName = moduleNames[i];
       var m = Process.findModuleByName(modName);
       if (!m) continue;
-      var exports = m.enumerateExports();
+      // Targeted per-symbol lookups instead of enumerateExports(): this is the
+      // call that previously SIGSEGV'd the target on giant/APK-embedded libs.
       var found = [];
-      for (var e = 0; e < exports.length; e++) {
-        if (symbolSet[exports[e].name]) {
-          found.push(exports[e].name);
+      for (var s = 0; s < symbolNames.length; s++) {
+        if (lookupExport(m, symbolNames[s])) {
+          found.push(symbolNames[s]);
         }
       }
       if (found.length > 0) {
@@ -157,7 +249,7 @@ rpc.exports = {
    * @param {string[]} probePatterns - Small set of hex patterns (TLS derivation labels)
    * @returns {string[]} Array of module names that had at least one pattern match
    */
-  batchProbeModules: function(moduleNames, probePatterns) {
+  batchProbeModules: async function(moduleNames, probePatterns) {
     var hits = [];
     for (var i = 0; i < moduleNames.length; i++) {
       var modName = moduleNames[i];
@@ -167,13 +259,8 @@ rpc.exports = {
       var found = false;
       for (var r = 0; r < ranges.length && !found; r++) {
         for (var p = 0; p < probePatterns.length && !found; p++) {
-          try {
-            var results = Memory.scanSync(ranges[r].base, ranges[r].size, probePatterns[p]);
-            if (results && results.length > 0) {
-              found = true;
-            }
-          } catch (e) {
-            // Ignore read errors
+          if (await scanRangeHasMatch(ranges[r].base, ranges[r].size, probePatterns[p])) {
+            found = true;
           }
         }
       }
@@ -190,15 +277,16 @@ rpc.exports = {
    * that survive in stripped binaries (.rodata section).
    *
    * @param {string} moduleName - Name of the module to scan
-   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scanSync
+   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scan
    * @returns {string[]} Array of hex patterns that were found (no address details)
    */
-  scanForStrings: function(moduleName, hexPatterns) {
+  scanForStrings: async function(moduleName, hexPatterns) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
     }
 
+    // Keep r-- AND r-x ranges: fingerprint version strings live in .rodata (r--).
     var moduleRanges = m.enumerateRanges('r');
 
     var found = [];
@@ -210,14 +298,9 @@ rpc.exports = {
         if (foundSet[pat]) {
           continue;  // Already found this pattern
         }
-        try {
-          var results = Memory.scanSync(range.base, range.size, pat);
-          if (results && results.length > 0) {
-            found.push(pat);
-            foundSet[pat] = true;
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        if (await scanRangeHasMatch(range.base, range.size, pat)) {
+          found.push(pat);
+          foundSet[pat] = true;
         }
       }
     }
@@ -229,10 +312,10 @@ rpc.exports = {
    * Uses Process.enumerateRanges('rwx') to find regions that are readable,
    * writable, and executable simultaneously.
    *
-   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scanSync
+   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scan
    * @returns {Object[]} Array of match objects with pattern, address, size, protection, occurrences
    */
-  scanModuleRWXRegions: function(hexPatterns) {
+  scanModuleRWXRegions: async function(hexPatterns) {
     var ranges = Process.enumerateRanges('rwx');
     var found = [];
     var foundSet = {};
@@ -243,20 +326,16 @@ rpc.exports = {
         if (foundSet[pat]) {
           continue;  // Already found this pattern
         }
-        try {
-          var results = Memory.scanSync(range.base, range.size, pat);
-          if (results && results.length > 0) {
-            found.push({
-              pattern: pat,
-              address: results[0].address.toString(),
-              size: range.size,
-              protection: range.protection,
-              occurrences: results.length
-            });
-            foundSet[pat] = true;
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var results = await scanRange(range.base, range.size, pat, { stopAfter: 1 });
+        if (results.length > 0) {
+          found.push({
+            pattern: pat,
+            address: results[0].address.toString(),
+            size: range.size,
+            protection: range.protection,
+            occurrences: results.length
+          });
+          foundSet[pat] = true;
         }
       }
     }
@@ -273,7 +352,7 @@ rpc.exports = {
    * @param {number} maxDistance - Max byte distance between the two halves (default 256)
    * @returns {Object[]} Array of proximity matches with leftStr, rightStr, addresses, distance
    */
-  scanSplitConstants: function(moduleName, splitPairs, maxDistance) {
+  scanSplitConstants: async function(moduleName, splitPairs, maxDistance) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
@@ -293,21 +372,13 @@ rpc.exports = {
 
       for (var r = 0; r < moduleRanges.length; r++) {
         var range = moduleRanges[r];
-        try {
-          var leftResults = Memory.scanSync(range.base, range.size, pair.leftHex);
-          for (var li = 0; li < leftResults.length; li++) {
-            leftMatches.push(leftResults[li].address);
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var leftResults = await scanRange(range.base, range.size, pair.leftHex);
+        for (var li = 0; li < leftResults.length; li++) {
+          leftMatches.push(leftResults[li].address);
         }
-        try {
-          var rightResults = Memory.scanSync(range.base, range.size, pair.rightHex);
-          for (var ri = 0; ri < rightResults.length; ri++) {
-            rightMatches.push(rightResults[ri].address);
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var rightResults = await scanRange(range.base, range.size, pair.rightHex);
+        for (var ri = 0; ri < rightResults.length; ri++) {
+          rightMatches.push(rightResults[ri].address);
         }
       }
 
@@ -339,7 +410,7 @@ rpc.exports = {
    * @param {Object[]} encodedPatterns - Array of {hexPattern, encodingType, detail}
    * @returns {Object[]} Array of match objects with hexPattern, encodingType, detail, address, offset
    */
-  scanForEncodedStrings: function(moduleName, encodedPatterns) {
+  scanForEncodedStrings: async function(moduleName, encodedPatterns) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
@@ -353,20 +424,16 @@ rpc.exports = {
       var patFound = false;
       for (var r = 0; r < moduleRanges.length && !patFound; r++) {
         var range = moduleRanges[r];
-        try {
-          var results = Memory.scanSync(range.base, range.size, ep.hexPattern);
-          if (results && results.length > 0) {
-            found.push({
-              hexPattern: ep.hexPattern,
-              encodingType: ep.encodingType,
-              detail: ep.detail,
-              address: results[0].address.toString(),
-              offset: results[0].address.sub(m.base).toString()
-            });
-            patFound = true;
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var results = await scanRange(range.base, range.size, ep.hexPattern, { stopAfter: 1 });
+        if (results.length > 0) {
+          found.push({
+            hexPattern: ep.hexPattern,
+            encodingType: ep.encodingType,
+            detail: ep.detail,
+            address: results[0].address.toString(),
+            offset: results[0].address.sub(m.base).toString()
+          });
+          patFound = true;
         }
       }
     }
@@ -378,38 +445,33 @@ rpc.exports = {
    * for hex patterns. Uses Process.enumerateRanges('rw-') and skips regions
    * larger than 64 MB to avoid scanning the entire heap.
    *
-   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scanSync
+   * @param {string[]} hexPatterns - Array of hex pattern strings for Memory.scan
    * @returns {Object[]} Array of match objects with pattern, address, size, protection, occurrences
    */
-  scanStackMemory: function(hexPatterns) {
-    var MAX_RANGE_SIZE = 64 * 1024 * 1024; // 64 MB
+  scanStackMemory: async function(hexPatterns) {
     var ranges = Process.enumerateRanges('rw-');
     var found = [];
     var foundSet = {};
     for (var r = 0; r < ranges.length; r++) {
       var range = ranges[r];
-      if (range.size > MAX_RANGE_SIZE) {
-        continue;
+      if (range.size > MAX_WRITABLE_RANGE) {
+        continue;  // Skip huge writable regions (whole heap) rather than scan them
       }
       for (var p = 0; p < hexPatterns.length; p++) {
         var pat = hexPatterns[p];
         if (foundSet[pat]) {
           continue;  // Already found this pattern
         }
-        try {
-          var results = Memory.scanSync(range.base, range.size, pat);
-          if (results && results.length > 0) {
-            found.push({
-              pattern: pat,
-              address: results[0].address.toString(),
-              size: range.size,
-              protection: range.protection,
-              occurrences: results.length
-            });
-            foundSet[pat] = true;
-          }
-        } catch (e) {
-          // Ignore read errors for individual ranges
+        var results = await scanRange(range.base, range.size, pat, { stopAfter: 1 });
+        if (results.length > 0) {
+          found.push({
+            pattern: pat,
+            address: results[0].address.toString(),
+            size: range.size,
+            protection: range.protection,
+            occurrences: results.length
+          });
+          foundSet[pat] = true;
         }
       }
     }
@@ -433,12 +495,13 @@ rpc.exports = {
    * @returns {Object} Combined results:
    *   {tlsMatches, fpMatches, splitMatches, encodedMatches}
    */
-  scanModuleCombined: function(moduleName, opts) {
+  scanModuleCombined: async function(moduleName, opts) {
     var m = Process.findModuleByName(moduleName);
     if (!m) {
       throw new Error("Module not found: " + moduleName);
     }
 
+    // Keep r-- AND r-x ranges; giant libs are bounded via chunking in scanRange.
     var moduleRanges = m.enumerateRanges('r');
 
     var maxSplitDistance = (typeof opts.maxSplitDistance !== 'undefined' && opts.maxSplitDistance !== null)
@@ -478,23 +541,19 @@ rpc.exports = {
             if (tlsFoundSet[tlsPat]) {
               continue;
             }
-            try {
-              var tlsResults = Memory.scanSync(range.base, range.size, tlsPat);
-              if (tlsResults && tlsResults.length > 0) {
-                tlsMatches.push({
-                  pattern: tlsPat,
-                  address: tlsResults[0].address.toString(),
-                  offset: tlsResults[0].address.sub(m.base).toString(),
-                  protection: range.protection,
-                  occurrences: tlsResults.length
-                });
-                tlsFoundSet[tlsPat] = true;
-                if (earlyExitThreshold > 0 && tlsMatches.length >= earlyExitThreshold) {
-                  break;
-                }
+            var tlsResults = await scanRange(range.base, range.size, tlsPat, { stopAfter: 1 });
+            if (tlsResults.length > 0) {
+              tlsMatches.push({
+                pattern: tlsPat,
+                address: tlsResults[0].address.toString(),
+                offset: tlsResults[0].address.sub(m.base).toString(),
+                protection: range.protection,
+                occurrences: tlsResults.length
+              });
+              tlsFoundSet[tlsPat] = true;
+              if (earlyExitThreshold > 0 && tlsMatches.length >= earlyExitThreshold) {
+                break;
               }
-            } catch (e) {
-              // Ignore read errors for individual ranges
             }
           }
         }
@@ -509,17 +568,12 @@ rpc.exports = {
             if (fpFoundSet[fpPat]) {
               continue;
             }
-            try {
-              var fpResults = Memory.scanSync(range.base, range.size, fpPat);
-              if (fpResults && fpResults.length > 0) {
-                fpMatches.push(fpPat);
-                fpFoundSet[fpPat] = true;
-                if (fpEarlyExitThreshold > 0 && fpMatches.length >= fpEarlyExitThreshold) {
-                  break;
-                }
+            if (await scanRangeHasMatch(range.base, range.size, fpPat)) {
+              fpMatches.push(fpPat);
+              fpFoundSet[fpPat] = true;
+              if (fpEarlyExitThreshold > 0 && fpMatches.length >= fpEarlyExitThreshold) {
+                break;
               }
-            } catch (e) {
-              // Ignore read errors for individual ranges
             }
           }
         }
@@ -532,20 +586,16 @@ rpc.exports = {
           if (encodedFoundSet[ep.hexPattern]) {
             continue;
           }
-          try {
-            var encResults = Memory.scanSync(range.base, range.size, ep.hexPattern);
-            if (encResults && encResults.length > 0) {
-              encodedMatches.push({
-                hexPattern: ep.hexPattern,
-                encodingType: ep.encodingType,
-                detail: ep.detail,
-                address: encResults[0].address.toString(),
-                offset: encResults[0].address.sub(m.base).toString()
-              });
-              encodedFoundSet[ep.hexPattern] = true;
-            }
-          } catch (e2) {
-            // Ignore read errors for individual ranges
+          var encResults = await scanRange(range.base, range.size, ep.hexPattern, { stopAfter: 1 });
+          if (encResults.length > 0) {
+            encodedMatches.push({
+              hexPattern: ep.hexPattern,
+              encodingType: ep.encodingType,
+              detail: ep.detail,
+              address: encResults[0].address.toString(),
+              offset: encResults[0].address.sub(m.base).toString()
+            });
+            encodedFoundSet[ep.hexPattern] = true;
           }
         }
       }
@@ -554,21 +604,13 @@ rpc.exports = {
       if (opts.splitPairs && opts.splitPairs.length) {
         for (var sp = 0; sp < opts.splitPairs.length; sp++) {
           var pair = opts.splitPairs[sp];
-          try {
-            var leftResults = Memory.scanSync(range.base, range.size, pair.leftHex);
-            for (var li = 0; li < leftResults.length; li++) {
-              splitAddresses[sp].leftMatches.push(leftResults[li].address);
-            }
-          } catch (e3) {
-            // Ignore read errors for individual ranges
+          var leftResults = await scanRange(range.base, range.size, pair.leftHex);
+          for (var li = 0; li < leftResults.length; li++) {
+            splitAddresses[sp].leftMatches.push(leftResults[li].address);
           }
-          try {
-            var rightResults = Memory.scanSync(range.base, range.size, pair.rightHex);
-            for (var ri = 0; ri < rightResults.length; ri++) {
-              splitAddresses[sp].rightMatches.push(rightResults[ri].address);
-            }
-          } catch (e4) {
-            // Ignore read errors for individual ranges
+          var rightResults = await scanRange(range.base, range.size, pair.rightHex);
+          for (var ri = 0; ri < rightResults.length; ri++) {
+            splitAddresses[sp].rightMatches.push(rightResults[ri].address);
           }
         }
       }
@@ -622,7 +664,7 @@ rpc.exports = {
    * @param {Object} sharedOpts - Shared scan options applied to all modules (fpPatterns, splitPairs, etc.)
    * @returns {Object} Map of {moduleName: {tlsMatches, fpMatches, splitMatches, encodedMatches}}
    */
-  batchScanModulesCombined: function(moduleConfigs, sharedOpts) {
+  batchScanModulesCombined: async function(moduleConfigs, sharedOpts) {
     var results = {};
     if (!sharedOpts) sharedOpts = {};
     for (var i = 0; i < moduleConfigs.length; i++) {
@@ -636,7 +678,8 @@ rpc.exports = {
         for (k in config.opts) { mergedOpts[k] = config.opts[k]; }
       }
       try {
-        results[moduleName] = rpc.exports.scanModuleCombined(moduleName, mergedOpts);
+        // scanModuleCombined is async now; await its Promise to keep the result shape.
+        results[moduleName] = await rpc.exports.scanModuleCombined(moduleName, mergedOpts);
       } catch (e) {
         results[moduleName] = { tlsMatches: [], fpMatches: [], splitMatches: [], encodedMatches: [] };
       }

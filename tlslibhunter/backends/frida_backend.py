@@ -59,20 +59,36 @@ class FridaBackend(Backend):
         except Exception as e:
             raise DeviceNotFoundError(f"Failed to get device: {e}") from e
 
-    def attach(self, device: Any, target: str | int, timeout: int = 10) -> Any:
+    def set_detached_callback(self, session: Any, callback: Callable) -> None:
+        """Register a detach handler on an existing session (frida session.on)."""
+        if callback is None:
+            return
+        with contextlib.suppress(Exception):
+            session.on("detached", callback)
+
+    def attach(
+        self,
+        device: Any,
+        target: str | int,
+        timeout: int = 10,
+        on_detached: Callable | None = None,
+    ) -> Any:
         # Try direct attachment first
+        session = None
         try:
             if isinstance(target, int):
                 session = device.attach(target)
                 logger.debug("Attached to PID %d", target)
-                return session
             else:
                 session = device.attach(target)
                 logger.debug("Attached to '%s'", target)
-                return session
         except Exception as e:
             last_error = e
             logger.debug("Direct attachment to '%s' failed: %s", target, e)
+
+        if session is not None:
+            self.set_detached_callback(session, on_detached)
+            return session
 
         if isinstance(target, int):
             raise AttachmentError(f"Failed to attach to PID {target}: {last_error}")
@@ -91,6 +107,7 @@ class FridaBackend(Backend):
                 try:
                     session = device.attach(proc.pid)
                     logger.info("Attached to '%s' (PID %d)", proc.name, proc.pid)
+                    self.set_detached_callback(session, on_detached)
                     return session
                 except Exception:
                     continue
@@ -99,10 +116,17 @@ class FridaBackend(Backend):
         proc_names = [f"{p.name} (PID {p.pid})" for p in procs[:20]]
         raise ProcessNotFoundError(f"Process '{target}' not found. Available processes:\n  " + "\n  ".join(proc_names))
 
-    def spawn(self, device: Any, target: str, timeout: int = 10) -> Any:
+    def spawn(
+        self,
+        device: Any,
+        target: str,
+        timeout: int = 10,
+        on_detached: Callable | None = None,
+    ) -> Any:
         try:
             pid = device.spawn([target])
             session = device.attach(pid)
+            self.set_detached_callback(session, on_detached)
             device.resume(pid)
             logger.info("Spawned and attached to '%s' (PID %d)", target, pid)
             return session
@@ -114,11 +138,15 @@ class FridaBackend(Backend):
         session: Any,
         source: str,
         on_message: Callable | None = None,
+        on_script_destroyed: Callable | None = None,
     ) -> Any:
         try:
             script = session.create_script(source)
             if on_message:
                 script.on("message", on_message)
+            if on_script_destroyed:
+                with contextlib.suppress(Exception):
+                    script.on("destroyed", on_script_destroyed)
             script.load()
             logger.debug("Script loaded successfully")
             return script

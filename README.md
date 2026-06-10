@@ -6,7 +6,7 @@
 
 
 # TLSLibHunter
-![version](https://img.shields.io/badge/version-0.2.0-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
+![version](https://img.shields.io/badge/version-0.2.7-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
 
 
@@ -34,6 +34,12 @@ tlsLibHunter com.example.app -m -l
 
 # JSON output
 tlsLibHunter firefox -l -f json
+
+# Full, unfiltered diagnostic scan (show known false positives + low-confidence hits)
+tlsLibHunter com.example.app -m -l --scan-everything
+
+# Debug run — also writes everything shown in the terminal to a log file
+tlsLibHunter com.example.app -m -l -d
 ```
 
 ### Example output:
@@ -84,5 +90,34 @@ extractions = hunter.extract(result, output_dir="./extracted_libs")
 - Multiple extraction methods: disk copy, ADB pull, APK extraction, memory dump
 - Clean Python API for programmatic use
 - Backend abstraction (currently only frida but might be extended to other frameworks in the future)
+
+
+## Result filtering & scan depth
+
+By default the results table is curated to show only **genuine, hookable TLS stacks** so the
+output stays actionable:
+
+- **Confidence threshold** — only `medium`- and `high`-confidence detections are shown. The long
+  tail of `low`-confidence hits (coincidental 4-byte ASCII fragments) is hidden.
+- **Known false positives** — crypto-primitive and JNI-wrapper libraries that carry TLS strings
+  (and may even re-export `SSL_*` symbols) but are **not** independently hookable TLS stacks are
+  skipped during scanning. This currently covers `libcrypto.so` /
+  `stable_cronet_libcrypto.so` (BoringSSL/OpenSSL primitives) and `libjavacrypto.so` (the
+  Conscrypt JNI bridge). The real key-extraction targets — `libssl.so`, `libcronet*`,
+  `stable_cronet_libssl.so` — are kept.
+
+Hidden detections are never lost silently: the scan summary logs how many were hidden, and the
+names are recorded in `pipeline_stats` (`hidden_low_confidence_names`,
+`hidden_false_positive_names`, `false_positive_skipped_names`).
+
+To see **everything** (known false positives, low-confidence rows, and the verbose weak-evidence
+breakdown), run a full scan with `--scan-everything`. This is the only flag that disables the
+default filters.
+
+### Debug log file
+
+Passing `-d` / `--debug` additionally tees **all terminal output** (the results table plus every
+log line) into a timestamped, ANSI-stripped file in the current directory, named
+`tlslibhunter_<target>_<YYYYmmdd-HHMMSS>.log`.
 
 

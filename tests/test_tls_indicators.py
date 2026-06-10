@@ -7,8 +7,38 @@ from tlslibhunter.scanner.tls_indicators import (
     TLS_EXPORT_SYMBOLS,
     TLS_STRING_PATTERNS,
     identify_library_type,
+    is_known_false_positive,
     is_known_tls_library,
 )
+
+
+class TestKnownFalsePositive:
+    """Crypto-primitive / JNI-wrapper libs are not hookable TLS stacks."""
+
+    def test_libcrypto_is_false_positive(self):
+        assert is_known_false_positive("libcrypto.so") is True
+
+    def test_versioned_libcrypto_is_false_positive(self):
+        assert is_known_false_positive("libcrypto.so.3") is True
+
+    def test_cronet_libcrypto_is_false_positive(self):
+        """The stable_cronet_ prefix must still match libcrypto."""
+        assert is_known_false_positive("stable_cronet_libcrypto.so") is True
+
+    def test_libjavacrypto_is_false_positive(self):
+        assert is_known_false_positive("libjavacrypto.so") is True
+
+    def test_libssl_is_not_false_positive(self):
+        assert is_known_false_positive("libssl.so") is False
+
+    def test_libcronet_is_not_false_positive(self):
+        assert is_known_false_positive("libcronet.148.0.7778.120.so") is False
+
+    def test_cronet_libssl_is_not_false_positive(self):
+        assert is_known_false_positive("stable_cronet_libssl.so") is False
+
+    def test_libmainlinecronet_is_not_false_positive(self):
+        assert is_known_false_positive("libmainlinecronet.141.0.7340.3.so") is False
 
 
 class TestTLSStringPatterns:

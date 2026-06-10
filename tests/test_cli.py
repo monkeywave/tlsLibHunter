@@ -1,6 +1,44 @@
 """Tests for CLI argument parsing."""
 
-from tlslibhunter.cli import build_parser
+import sys
+
+from tlslibhunter.cli import _setup_debug_log_file, build_parser
+
+
+class TestDebugLogFile:
+    """The -d log file tees terminal output (ANSI stripped) to disk."""
+
+    def test_creates_log_file_and_strips_ansi(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        real_stdout, real_stderr = sys.stdout, sys.stderr
+        try:
+            log_path = _setup_debug_log_file("The Weather Channel")
+            assert log_path is not None
+            # Filename is sanitized + lands in the cwd.
+            assert (tmp_path / log_path).exists()
+            # Colored (ANSI) output written to the tee is stored clean.
+            print("\x1b[32mhigh\x1b[0m row")
+            sys.stdout.flush()
+        finally:
+            sys.stdout, sys.stderr = real_stdout, real_stderr
+        contents = (tmp_path / log_path).read_text(encoding="utf-8")
+        assert "high row" in contents
+        assert "\x1b[" not in contents  # escape codes stripped
+
+    def test_tees_both_stdout_and_stderr(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        real_stdout, real_stderr = sys.stdout, sys.stderr
+        try:
+            log_path = _setup_debug_log_file("app")
+            print("on stdout")
+            print("on stderr", file=sys.stderr)
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            sys.stdout, sys.stderr = real_stdout, real_stderr
+        contents = (tmp_path / log_path).read_text(encoding="utf-8")
+        assert "on stdout" in contents
+        assert "on stderr" in contents
 
 
 class TestCLIParsing:

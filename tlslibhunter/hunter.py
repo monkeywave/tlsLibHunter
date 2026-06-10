@@ -145,11 +145,15 @@ class TLSLibHunter:
         self._initialize()
 
         from tlslibhunter.scanner.module_scanner import ModuleScanner
+        from tlslibhunter.utils.process_resolver import resolve_target
 
         # Determine package name for Android classification
         package_name = None
         if self._platform == "android" and "." in self._config.target:
             package_name = self._config.target
+
+        # Target string used to re-spawn the process for crash recovery (spawn mode only).
+        respawn_target = str(resolve_target(self._config.target))
 
         scanner = ModuleScanner(
             backend=self._backend,
@@ -164,6 +168,9 @@ class TLSLibHunter:
             scan_encoded_strings=self._config.scan_encoded_strings,
             scan_all_modules=self._config.scan_all_modules,
             scan_everything=self._config.scan_everything,
+            device=self._device,
+            respawn_target=respawn_target,
+            spawn_mode=self._config.spawn,
         )
 
         try:

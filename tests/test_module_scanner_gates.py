@@ -15,6 +15,7 @@ from tlslibhunter.scanner.module_scanner import (
     _build_hex_pattern_map,
     _build_hex_patterns,
 )
+from tlslibhunter.scanner.results import DetectedLibrary, ScanResult
 
 
 def _make_scanner(**kwargs) -> ModuleScanner:
@@ -25,6 +26,70 @@ def _make_scanner(**kwargs) -> ModuleScanner:
         platform=kwargs.pop("platform", "android"),
         **kwargs,
     )
+
+
+def _sample_result() -> ScanResult:
+    """A result mixing real stacks, a known-FP, and low-confidence noise."""
+    return ScanResult(
+        target="app",
+        platform="android",
+        libraries=[
+            DetectedLibrary(name="libssl.so", path="/p/libssl.so", library_type="boringssl", confidence="high"),
+            DetectedLibrary(name="libcrypto.so", path="/p/libcrypto.so", library_type="boringssl", confidence="medium"),
+            DetectedLibrary(name="libxml2.so", path="/p/libxml2.so", library_type="unknown", confidence="low"),
+            DetectedLibrary(
+                name="stable_cronet_libcrypto.so",
+                path="/p/stable_cronet_libcrypto.so",
+                library_type="boringssl",
+                confidence="medium",
+            ),
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# _apply_default_result_filters: hide low-confidence + known-FP by default
+# ---------------------------------------------------------------------------
+
+
+def test_scanner_initialises_false_positive_tracking_list():
+    sc = _make_scanner()
+    assert sc._skipped_false_positive == []
+
+
+def test_default_filter_drops_low_and_known_fp():
+    sc = _make_scanner()
+    result = _sample_result()
+    sc._apply_default_result_filters(result)
+    kept = {lib.name for lib in result.libraries}
+    assert kept == {"libssl.so"}  # only the real high-confidence stack survives
+    assert result.pipeline_stats["hidden_low_confidence_names"] == ["libxml2.so"]
+    assert set(result.pipeline_stats["hidden_false_positive_names"]) == {
+        "libcrypto.so",
+        "stable_cronet_libcrypto.so",
+    }
+
+
+def test_scan_everything_keeps_everything():
+    sc = _make_scanner(scan_everything=True)
+    result = _sample_result()
+    sc._apply_default_result_filters(result)
+    assert len(result.libraries) == 4  # nothing filtered in full-scan mode
+    assert "hidden_low_confidence_names" not in result.pipeline_stats
+
+
+def test_default_filter_keeps_medium_non_fp():
+    """A medium-confidence row that is NOT a known-FP must survive the default filter."""
+    sc = _make_scanner()
+    result = ScanResult(
+        target="app",
+        platform="android",
+        libraries=[
+            DetectedLibrary(name="libfoo.so", path="/p/libfoo.so", library_type="boringssl", confidence="medium"),
+        ],
+    )
+    sc._apply_default_result_filters(result)
+    assert [lib.name for lib in result.libraries] == ["libfoo.so"]
 
 
 # ---------------------------------------------------------------------------

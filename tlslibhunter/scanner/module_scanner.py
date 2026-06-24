@@ -604,9 +604,7 @@ class ModuleScanner:
                     logger.error("Excluded offending module after crash: %s", victim)
                     need_reattach = True
                 else:
-                    logger.debug(
-                        "%s: non-fatal error on %s, skipping: %s", label, self._module_name(chunk[0]), e
-                    )
+                    logger.debug("%s: non-fatal error on %s, skipping: %s", label, self._module_name(chunk[0]), e)
         return result
 
     def _record_unrecoverable(self, label: str, pending: list) -> None:
@@ -1077,9 +1075,7 @@ class ModuleScanner:
                 return self._exports.batch_probe_modules(names, probe_patterns)
 
             try:
-                probe_hits = self._run_resilient(
-                    "TLS probe", no_exports, _run_probe, list, lambda a, b: a + b
-                )
+                probe_hits = self._run_resilient("TLS probe", no_exports, _run_probe, list, lambda a, b: a + b)
             except Exception as e:
                 logger.debug("Batch probe error: %s, including all remaining as candidates", e)
                 probe_hits = probe_names  # Fail-safe: include all

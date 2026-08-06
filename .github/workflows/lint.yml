@@ -20,3 +20,34 @@ jobs:
       - run: pip install ruff
       - run: ruff check .
       - run: ruff format --check .
+
+  # The unit suite needs no device and no frida-server: it exercises the
+  # classifier, pattern builders and result plumbing only, and runs in well under
+  # a second. It was previously not gated by CI at all.
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e .[dev] || pip install -e .
+      - run: pip install pytest
+      - run: python -m pytest tests -q
+
+  # scanner_agent.js is the Frida-side hot path. These tests evaluate the real
+  # agent source in a vm sandbox with Process/Memory/rpc stubbed, so they cover
+  # the chunk-overlap arithmetic and the range filter without needing a target
+  # process. node:test is built into Node, so there is nothing to install.
+  agent-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --check tlslibhunter/scripts/scanner_agent.js
+      - run: node --test tests/scanner_agent.test.js

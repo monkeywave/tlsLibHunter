@@ -7,6 +7,103 @@
 var SCAN_CHUNK_SIZE = 48 * 1024 * 1024;     // 48 MB scan window
 var MAX_WRITABLE_RANGE = 64 * 1024 * 1024;  // cap for writable (heap/stack) ranges
 var SCAN_TIMEOUT_MS = 120000;               // safety net so a hung native scan can't deadlock the RPC
+var MAX_PLAUSIBLE_MODULE_RANGE = 64 * 1024 * 1024;  // floor for the per-module range cap; see moduleScanRegions
+var MAX_SPLIT_MATCHES = 4096;               // cap on retained split-constant addresses per range
+
+/**
+ * The memory regions that actually belong to *m*, as [{base, size}].
+ *
+ * `Module.enumerateRanges('r')` is the natural primitive, and the module-level
+ * API is the right choice because dyld-shared-cache segments are genuinely
+ * non-contiguous (libboringssl's __TEXT sits ~2 GB away from its __DATA_CONST).
+ * But on Apple platforms it also reports, for EVERY cache image, one enormous
+ * read-only range that belongs to the cache as a whole rather than to the
+ * module. Measured on macOS 26.3.1 arm64, every single image carried the same
+ * 587.3 MB region at 0x206aa4000:
+ *
+ *     module                       m.size    range total   section total
+ *     libcoretls_cfhelpers.dylib   6.1 KB    587.4 MB      5.0 KB
+ *     libcoretls.dylib            93.7 KB    587.4 MB     95.8 KB
+ *     libboringssl.dylib         851.6 KB    588.2 MB    922.7 KB
+ *     6 modules, total                        3.5 GB      31.2 MB
+ *
+ * Scanning that region once per module per pattern is what made a six-module
+ * scan read ~106 GB and take ~113 s: a 6.1 KB module was scanning 587.4 MB,
+ * 119,264x its own size. It cannot pay for itself either — it is shared, so it
+ * is not attributable to any one module, and a TLS implementation is not in it.
+ *
+ * So we drop ranges that are implausibly large for the module in question and
+ * keep everything else. That is deliberately more conservative than switching to
+ * `Module.enumerateSections()`: sections are exact, and on every module measured
+ * they agreed with this filter to within a few percent — but they only describe
+ * memory the section headers know about, and this tool exists partly to find TLS
+ * code inside packed or stripped libraries whose payload may be mapped without
+ * appearing in any section header. Filtering keeps those; sections would not.
+ *
+ * The floor matters as much as the multiple: `m.size` is only the primary
+ * mapping (on the shared cache, only __TEXT), so a small module must still be
+ * allowed its normal data segments. Hence the cap never drops below
+ * MAX_PLAUSIBLE_MODULE_RANGE.
+ *
+ * @param {Module} m - Module instance (from Process.findModuleByName)
+ * @returns {{regions: Array, skippedBytes: number, skippedCount: number}}
+ */
+function moduleScanRegions(m) {
+  var cap = m.size * 4;
+  if (cap < MAX_PLAUSIBLE_MODULE_RANGE) {
+    cap = MAX_PLAUSIBLE_MODULE_RANGE;
+  }
+
+  var regions = [];
+  var skippedBytes = 0;
+  var skippedCount = 0;
+  var ranges = m.enumerateRanges('r');
+  for (var i = 0; i < ranges.length; i++) {
+    if (ranges[i].size > cap) {
+      skippedBytes += ranges[i].size;
+      skippedCount++;
+      continue;
+    }
+    regions.push({ base: ranges[i].base, size: ranges[i].size });
+  }
+
+  if (skippedCount > 0) {
+    // Never silent: dropping a range is a coverage decision, so say so. The
+    // caller also gets the counts back for the Python side to surface.
+    console.log('[tlslibhunter] ' + m.name + ': skipped ' + skippedCount +
+      ' oversized range(s), ' + skippedBytes + ' bytes (cap ' + cap +
+      ', module size ' + m.size + ') - shared/unattributable memory');
+  }
+
+  return { regions: regions, skippedBytes: skippedBytes, skippedCount: skippedCount };
+}
+
+/**
+ * Number of bytes a Frida hex pattern will match, so a chunked scan can overlap
+ * consecutive windows by enough to catch a match that straddles the boundary.
+ *
+ * Frida patterns are space-separated bytes, where each byte is two hex nibbles
+ * or a wildcard ('??' or '?'). A ':' introduces a mask suffix, which does not
+ * change the match length. Returns 0 for anything unparseable, which callers
+ * treat as "no overlap" — the pre-existing behaviour.
+ *
+ * @param {string} pattern - Frida hex pattern, e.g. "41 42 ?? 44"
+ * @returns {number} match length in bytes
+ */
+function patternByteLength(pattern) {
+  if (typeof pattern !== 'string') {
+    return 0;
+  }
+  var body = pattern.split(':')[0];        // drop any mask suffix
+  var tokens = body.trim().split(/\s+/);
+  var count = 0;
+  for (var i = 0; i < tokens.length; i++) {
+    if (tokens[i].length > 0) {
+      count++;
+    }
+  }
+  return count;
+}
 
 /**
  * Targeted export presence check. Replaces full Module.enumerateExports() walks,
@@ -48,36 +145,89 @@ function scanRange(base, size, pattern, opts) {
   opts = opts || {};
   var stopAfter = opts.stopAfter || 0;
 
+  // Overlap consecutive windows by (match length - 1) bytes so a pattern lying
+  // across a chunk boundary is still found. Without this, every 48 MB boundary
+  // was a blind spot: the scan simply advanced by chunkSize and any match
+  // spanning the seam was silently lost. Matches are deduped by address below,
+  // so the re-scanned bytes cannot produce duplicates.
+  var overlap = patternByteLength(pattern) - 1;
+  if (overlap < 0) {
+    overlap = 0;
+  }
+  // Guarantee forward progress even for an absurdly long pattern: half a window
+  // of overlap still advances by half a window per iteration. Real patterns are
+  // tens of bytes, so this never binds in practice.
+  if (overlap > SCAN_CHUNK_SIZE / 2) {
+    overlap = Math.floor(SCAN_CHUNK_SIZE / 2);
+  }
+
   return new Promise(function (resolve) {
     var matches = [];
-    var remaining = (typeof size === 'number') ? size : size.toNumber();
-    var cursor = base;
+    var seen = {};
+    var totalSize = (typeof size === 'number') ? size : size.toNumber();
+    // Offset past which nothing has been scanned yet. Tracked as an absolute
+    // offset rather than a "remaining" countdown: with overlapping windows a
+    // countdown double-counts the overlap and leaves a spurious sliver window
+    // at the end of every range.
+    var scannedTo = 0;
     var settled = false;
+    var truncated = false;
 
     var timer = setTimeout(function () {
-      if (!settled) { settled = true; resolve(matches); }
+      if (!settled) {
+        // Do NOT hide this: resolving with partial matches used to look exactly
+        // like "this module has no TLS library". Flag it so the caller can
+        // report an incomplete scan instead of a negative result.
+        truncated = true;
+        settled = true;
+        console.log('[tlslibhunter] scan of ' + base + ' (' + (totalSize - scannedTo) +
+          ' of ' + totalSize + ' bytes still unscanned) hit the ' + SCAN_TIMEOUT_MS +
+          ' ms safety net; results for this range are INCOMPLETE');
+        settle();
+      }
     }, SCAN_TIMEOUT_MS);
+
+    // scanRange historically resolved to a plain array, and callers index it and
+    // read .length. Keep that shape and carry the flag as a property so no
+    // caller has to change to stay correct.
+    function settle() {
+      matches.truncated = truncated;
+      resolve(matches);
+    }
 
     function finish() {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(matches);
+      settle();
     }
 
     function scanNextChunk() {
       if (settled) return;
-      if (remaining <= 0) { finish(); return; }
+      if (scannedTo >= totalSize) { finish(); return; }
       if (stopAfter > 0 && matches.length >= stopAfter) { finish(); return; }
 
-      var chunkSize = remaining > SCAN_CHUNK_SIZE ? SCAN_CHUNK_SIZE : remaining;
-      var chunkBase = cursor;
-      cursor = cursor.add(chunkSize);  // NativePointer arithmetic; chunkSize <= 48 MB
-      remaining -= chunkSize;
+      // Start each window (overlap) bytes before the end of the previous one, so
+      // a match lying across the seam falls wholly inside this window.
+      var chunkStart = scannedTo > 0 ? scannedTo - overlap : 0;
+      if (chunkStart < 0) {
+        chunkStart = 0;
+      }
+      var chunkSize = totalSize - chunkStart;
+      if (chunkSize > SCAN_CHUNK_SIZE) {
+        chunkSize = SCAN_CHUNK_SIZE;
+      }
+      var chunkBase = base.add(chunkStart);  // NativePointer arithmetic
+      scannedTo = chunkStart + chunkSize;
 
       Memory.scan(chunkBase, chunkSize, pattern, {
         onMatch: function (address, matchSize) {
-          matches.push({ address: address, size: matchSize });
+          // Dedupe: the overlap region is scanned twice by design.
+          var key = address.toString();
+          if (!seen[key]) {
+            seen[key] = true;
+            matches.push({ address: address, size: matchSize });
+          }
           if (stopAfter > 0 && matches.length >= stopAfter) {
             return 'stop';  // cancel this chunk early
           }
@@ -99,12 +249,73 @@ function scanRange(base, size, pattern, opts) {
 
 /**
  * Convenience: resolve to true if the pattern occurs at least once in the range.
+ *
+ * A false result is ambiguous when the underlying scan was cut short by the
+ * safety net, so callers that care can pass an accumulator and have
+ * `.truncated` set — "not found" and "did not finish looking" must not be
+ * reported as the same thing.
+ *
+ * @param {object} [acc] - optional accumulator; `acc.truncated` is OR-ed in
  * @returns {Promise<boolean>}
  */
-function scanRangeHasMatch(base, size, pattern) {
+function scanRangeHasMatch(base, size, pattern, acc) {
   return scanRange(base, size, pattern, { stopAfter: 1 }).then(function (m) {
+    if (acc && m.truncated) {
+      acc.truncated = true;
+    }
     return m.length > 0;
   });
+}
+
+/**
+ * First pair (l, r) with |l - r| <= maxDistance, or null.
+ *
+ * Replaces a `leftMatches x rightMatches` nested loop. That loop did break on
+ * the first hit, so it was cheap when a pair existed — but the common case for a
+ * non-matching module is that NO pair exists, and then it ran the full product
+ * over two unbounded match lists. Sorting both sides and sweeping them together
+ * makes the no-match case O(n log n) instead of O(n*m).
+ *
+ * It also fixes an overflow: the old code computed
+ * `Math.abs(l.sub(r).toInt32())`, and toInt32() wraps once the two addresses are
+ * more than 2 GB apart — which is routine on the dyld shared cache, where a
+ * module's __TEXT and __DATA_CONST sit ~2 GB apart. A wrapped difference can
+ * look arbitrarily small, so distant pairs could be reported as adjacent. Here
+ * proximity is decided by pointer comparison first, so the subtraction only ever
+ * runs on pairs already known to be within maxDistance.
+ *
+ * Works on anything exposing NativePointer's `compare`, `add` and
+ * `sub().toInt32()`, so it is testable with plain stubs.
+ *
+ * @param {Array} leftAddrs
+ * @param {Array} rightAddrs
+ * @param {number} maxDistance
+ * @returns {?{left: object, right: object, distance: number}}
+ */
+function findNearbyPair(leftAddrs, rightAddrs, maxDistance) {
+  if (!leftAddrs || !rightAddrs || leftAddrs.length === 0 || rightAddrs.length === 0) {
+    return null;
+  }
+
+  function byAddress(a, b) { return a.compare(b); }
+  var left = leftAddrs.slice().sort(byAddress);
+  var right = rightAddrs.slice().sort(byAddress);
+
+  var i = 0, j = 0;
+  while (i < left.length && j < right.length) {
+    var l = left[i];
+    var r = right[j];
+    // Within maxDistance in either direction? Pure pointer compares, no
+    // subtraction, so no 32-bit wraparound.
+    var lNearR = l.add(maxDistance).compare(r) >= 0;
+    var rNearL = r.add(maxDistance).compare(l) >= 0;
+    if (lNearR && rNearL) {
+      return { left: l, right: r, distance: Math.abs(l.sub(r).toInt32()) };
+    }
+    // Advance whichever side is behind; the other cannot get closer.
+    if (l.compare(r) < 0) { i++; } else { j++; }
+  }
+  return null;
 }
 
 rpc.exports = {
@@ -144,8 +355,9 @@ rpc.exports = {
 
     // Use Module.enumerateRanges instead of Process.enumerateRanges + manual
     // filtering. Frida's module-level API correctly handles dyld shared cache
-    // modules where segments are non-contiguous in virtual memory.
-    var moduleRanges = m.enumerateRanges('r');
+    // modules where segments are non-contiguous in virtual memory. The oversized
+    // shared-cache range it also reports is filtered out by moduleScanRegions.
+    var moduleRanges = moduleScanRegions(m).regions;
 
     var found = [];
     for (var r = 0; r < moduleRanges.length; r++) {
@@ -255,7 +467,7 @@ rpc.exports = {
       var modName = moduleNames[i];
       var m = Process.findModuleByName(modName);
       if (!m) continue;
-      var ranges = m.enumerateRanges('r');
+      var ranges = moduleScanRegions(m).regions;
       var found = false;
       for (var r = 0; r < ranges.length && !found; r++) {
         for (var p = 0; p < probePatterns.length && !found; p++) {
@@ -287,7 +499,7 @@ rpc.exports = {
     }
 
     // Keep r-- AND r-x ranges: fingerprint version strings live in .rodata (r--).
-    var moduleRanges = m.enumerateRanges('r');
+    var moduleRanges = moduleScanRegions(m).regions;
 
     var found = [];
     var foundSet = {};
@@ -362,7 +574,7 @@ rpc.exports = {
       maxDistance = 256;
     }
 
-    var moduleRanges = m.enumerateRanges('r');
+    var moduleRanges = moduleScanRegions(m).regions;
     var found = [];
 
     for (var s = 0; s < splitPairs.length; s++) {
@@ -416,7 +628,7 @@ rpc.exports = {
       throw new Error("Module not found: " + moduleName);
     }
 
-    var moduleRanges = m.enumerateRanges('r');
+    var moduleRanges = moduleScanRegions(m).regions;
     var found = [];
 
     for (var p = 0; p < encodedPatterns.length; p++) {
@@ -502,7 +714,13 @@ rpc.exports = {
     }
 
     // Keep r-- AND r-x ranges; giant libs are bounded via chunking in scanRange.
-    var moduleRanges = m.enumerateRanges('r');
+    // moduleScanRegions drops the shared dyld-cache range that Apple platforms
+    // report for every image — see its docstring for the measured cost.
+    var scanRegions = moduleScanRegions(m);
+    var moduleRanges = scanRegions.regions;
+    // Accumulates whether ANY range scan below was cut short by the safety net,
+    // so an incomplete scan is never reported as a clean "nothing found".
+    var scanAcc = { truncated: false };
 
     var maxSplitDistance = (typeof opts.maxSplitDistance !== 'undefined' && opts.maxSplitDistance !== null)
       ? opts.maxSplitDistance : 256;
@@ -542,6 +760,7 @@ rpc.exports = {
               continue;
             }
             var tlsResults = await scanRange(range.base, range.size, tlsPat, { stopAfter: 1 });
+            if (tlsResults.truncated) { scanAcc.truncated = true; }
             if (tlsResults.length > 0) {
               tlsMatches.push({
                 pattern: tlsPat,
@@ -568,7 +787,7 @@ rpc.exports = {
             if (fpFoundSet[fpPat]) {
               continue;
             }
-            if (await scanRangeHasMatch(range.base, range.size, fpPat)) {
+            if (await scanRangeHasMatch(range.base, range.size, fpPat, scanAcc)) {
               fpMatches.push(fpPat);
               fpFoundSet[fpPat] = true;
               if (fpEarlyExitThreshold > 0 && fpMatches.length >= fpEarlyExitThreshold) {
@@ -604,13 +823,26 @@ rpc.exports = {
       if (opts.splitPairs && opts.splitPairs.length) {
         for (var sp = 0; sp < opts.splitPairs.length; sp++) {
           var pair = opts.splitPairs[sp];
-          var leftResults = await scanRange(range.base, range.size, pair.leftHex);
+          // Bounded: these two scans have no stopAfter by nature (we need the
+          // addresses, not just existence), so cap how many we retain. An
+          // unbounded collection over a large range could balloon into a huge
+          // array before the proximity check ever ran.
+          var leftResults = await scanRange(range.base, range.size, pair.leftHex,
+            { stopAfter: MAX_SPLIT_MATCHES });
+          if (leftResults.truncated) { scanAcc.truncated = true; }
           for (var li = 0; li < leftResults.length; li++) {
             splitAddresses[sp].leftMatches.push(leftResults[li].address);
           }
-          var rightResults = await scanRange(range.base, range.size, pair.rightHex);
+          var rightResults = await scanRange(range.base, range.size, pair.rightHex,
+            { stopAfter: MAX_SPLIT_MATCHES });
+          if (rightResults.truncated) { scanAcc.truncated = true; }
           for (var ri = 0; ri < rightResults.length; ri++) {
             splitAddresses[sp].rightMatches.push(rightResults[ri].address);
+          }
+          if (leftResults.length >= MAX_SPLIT_MATCHES || rightResults.length >= MAX_SPLIT_MATCHES) {
+            console.log('[tlslibhunter] ' + moduleName + ': split-constant matches for "' +
+              pair.leftStr + '"/"' + pair.rightStr + '" hit the ' + MAX_SPLIT_MATCHES +
+              ' cap in one range; proximity results may be incomplete');
           }
         }
       }
@@ -620,26 +852,19 @@ rpc.exports = {
     if (opts.splitPairs && opts.splitPairs.length) {
       for (var sc = 0; sc < opts.splitPairs.length; sc++) {
         var sPair = opts.splitPairs[sc];
-        var sLeft = splitAddresses[sc].leftMatches;
-        var sRight = splitAddresses[sc].rightMatches;
-        if (sLeft.length === 0 || sRight.length === 0) {
-          continue;
-        }
-        var matched = false;
-        for (var l = 0; l < sLeft.length && !matched; l++) {
-          for (var rr = 0; rr < sRight.length && !matched; rr++) {
-            var dist = Math.abs(sLeft[l].sub(sRight[rr]).toInt32());
-            if (dist <= maxSplitDistance) {
-              splitMatches.push({
-                leftStr: sPair.leftStr,
-                rightStr: sPair.rightStr,
-                leftAddress: sLeft[l].toString(),
-                rightAddress: sRight[rr].toString(),
-                distance: dist
-              });
-              matched = true;
-            }
-          }
+        var nearby = findNearbyPair(
+          splitAddresses[sc].leftMatches,
+          splitAddresses[sc].rightMatches,
+          maxSplitDistance
+        );
+        if (nearby) {
+          splitMatches.push({
+            leftStr: sPair.leftStr,
+            rightStr: sPair.rightStr,
+            leftAddress: nearby.left.toString(),
+            rightAddress: nearby.right.toString(),
+            distance: nearby.distance
+          });
         }
       }
     }
@@ -648,7 +873,13 @@ rpc.exports = {
       tlsMatches: tlsMatches,
       fpMatches: fpMatches,
       splitMatches: splitMatches,
-      encodedMatches: encodedMatches
+      encodedMatches: encodedMatches,
+      // Reported so the host can distinguish "no TLS library here" from "the
+      // scan did not finish", and can say how much memory was deliberately
+      // left out. Both used to be invisible.
+      truncated: scanAcc.truncated,
+      skippedBytes: scanRegions.skippedBytes,
+      scannedBytes: moduleRanges.reduce(function (a, r) { return a + r.size; }, 0)
     };
   },
 

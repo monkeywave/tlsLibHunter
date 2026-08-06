@@ -53,3 +53,5 @@ htmlcov/
 # misc
 research/
 research_State.txt
+*.log
+tls_libs*

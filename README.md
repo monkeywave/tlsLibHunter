@@ -6,7 +6,7 @@
 
 
 # TLSLibHunter
-![version](https://img.shields.io/badge/version-0.2.7-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
+![version](https://img.shields.io/badge/version-0.2.8-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
 
 
@@ -113,6 +113,24 @@ names are recorded in `pipeline_stats` (`hidden_low_confidence_names`,
 To see **everything** (known false positives, low-confidence rows, and the verbose weak-evidence
 breakdown), run a full scan with `--scan-everything`. This is the only flag that disables the
 default filters.
+
+### What memory gets scanned
+
+A module is scanned over the ranges it actually owns. `Module.enumerateRanges('r')` is the
+starting point, but on Apple platforms it reports — for **every** dyld-shared-cache image — one
+enormous read-only range belonging to the cache as a whole rather than to the module (measured on
+macOS 26.3: the same 587 MB region for all of them). Scanning that once per module per pattern
+made a six-module macOS scan read ~106 GB and take ~113 s, with a 6 KB module scanning 587 MB.
+
+`moduleScanRegions` in `tlslibhunter/scripts/scanner_agent.js` therefore drops ranges that are
+implausibly large for the module in question, keeping everything else. A skipped range is always
+logged with its size — coverage decisions are never silent. Detection is unaffected: the shared
+region is by definition not attributable to any one module, and scanning it actually produced
+*false* fingerprints, since every image "matched" strings that merely lived in the cache.
+
+If a pattern scan does not finish within its safety-net window, the affected modules are listed in
+`ScanResult.errors` — an incomplete scan is reported as incomplete rather than as "no TLS library
+found".
 
 ### Debug log file
 

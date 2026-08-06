@@ -37,6 +37,27 @@ def _load_scanner_js() -> str:
         return f.read()
 
 
+def _truncated_scan_message(batch_results: dict) -> str | None:
+    """Describe any module whose pattern scan did not finish, or None.
+
+    The agent's per-range safety net resolves with whatever matches it had so
+    far, so a timed-out scan and a genuinely clean "no TLS library here" look
+    identical in the results. The agent now reports ``truncated`` per module and
+    this turns that into a message for ``ScanResult.errors``, so an incomplete
+    scan is never silently read as a negative result.
+    """
+    truncated = sorted(
+        name for name, combined in batch_results.items() if isinstance(combined, dict) and combined.get("truncated")
+    )
+    if not truncated:
+        return None
+    return (
+        f"Pattern scan did not finish for {len(truncated)} module(s): {truncated}. "
+        "Results for these are INCOMPLETE - a negative result here does not mean "
+        "no TLS library is present."
+    )
+
+
 def _build_hex_patterns(strings: list[str] | None = None) -> list[str]:
     """Build deduplicated hex patterns for TLS string indicators.
 
@@ -1175,6 +1196,11 @@ class ModuleScanner:
                         logger.error("Target process died during sequential scan; stopping further scans.")
                         break
                     logger.debug("Combined scan error for %s: %s", cfg["name"], e2)
+
+        truncated_message = _truncated_scan_message(batch_results)
+        if truncated_message:
+            logger.warning(truncated_message)
+            result.errors.append(truncated_message)
 
         for mod in all_confirmed:
             name = mod.get("name", "")

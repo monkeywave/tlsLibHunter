@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from typing import Any, Callable
 
 from tlslibhunter.backends.base import (
@@ -25,6 +26,38 @@ _AGENT_LOG_LEVELS = {
     "warning": logging.WARNING,
     "error": logging.ERROR,
 }
+
+
+# frida's DeviceManager is process-global, so a remote device registered by one
+# backend is visible to every other. Removing it on close() would rip the device
+# out from under a second hunter still scanning through the same host, so
+# registrations are reference-counted across the process and only the last user
+# out removes the device.
+_remote_host_lock = threading.Lock()
+_remote_host_users: dict[str, int] = {}
+_remote_hosts_registered: set[str] = set()
+
+
+def _acquire_remote_host(host: str, registered_now: bool) -> None:
+    """Record that a backend is using *host*."""
+    with _remote_host_lock:
+        _remote_host_users[host] = _remote_host_users.get(host, 0) + 1
+        if registered_now:
+            _remote_hosts_registered.add(host)
+
+
+def _release_remote_host(host: str) -> bool:
+    """Drop one use of *host*; True when the caller should remove the device."""
+    with _remote_host_lock:
+        remaining = _remote_host_users.get(host, 0) - 1
+        if remaining > 0:
+            _remote_host_users[host] = remaining
+            return False
+        _remote_host_users.pop(host, None)
+        # Only remove a device this process actually registered.
+        was_registered = host in _remote_hosts_registered
+        _remote_hosts_registered.discard(host)
+        return was_registered
 
 
 def _forward_agent_log(level: str, text: str) -> None:
@@ -53,7 +86,8 @@ class FridaBackend(Backend):
     """Frida-based instrumentation backend."""
 
     def __init__(self) -> None:
-        # Remote devices this instance registered, so close() removes only those.
+        # Remote hosts this instance is USING (one entry per get_device call),
+        # used to release its share of the process-wide reference count.
         self._remote_hosts: list[str] = []
         self._device_manager: Any = None
 
@@ -64,8 +98,8 @@ class FridaBackend(Backend):
         a module-global that must outlive us.
         """
         manager = self._device_manager
-        if manager is not None:
-            for host in reversed(self._remote_hosts):
+        for host in reversed(self._remote_hosts):
+            if _release_remote_host(host) and manager is not None:
                 try:
                     manager.remove_remote_device(host)
                     logger.debug("Removed remote device: %s", host)
@@ -87,15 +121,17 @@ class FridaBackend(Backend):
             if host:
                 manager = frida.get_device_manager()
                 self._device_manager = manager
+                registered_now = True
                 try:
                     manager.add_remote_device(host)
                 except Exception as e:
-                    # Already registered by someone else in this process, or
-                    # rejected. Only record hosts WE added, so close() never
-                    # removes a device another caller owns.
+                    # Usually "already registered" by another backend in this
+                    # process; we still take a reference so the device is not
+                    # removed while we are using it.
                     logger.debug("add_remote_device(%s): %s", host, e)
-                else:
-                    self._remote_hosts.append(host)
+                    registered_now = False
+                _acquire_remote_host(host, registered_now)
+                self._remote_hosts.append(host)
                 device = frida.get_device(host, timeout=timeout)
                 logger.debug("Connected to remote device: %s", host)
             elif serial:
@@ -146,9 +182,9 @@ class FridaBackend(Backend):
             session = device.attach(target)
         except frida.ProcessNotFoundError as e:
             # No single process carries this name. Falling back to a looser
-            # name match below is legitimate.
-            resolve_error: Exception = e
-        except Exception as e:
+            # name match is legitimate here, and only here.
+            return self._attach_by_name_match(device, target, e, on_detached)
+        except (frida.PermissionDeniedError, frida.NotSupportedError) as e:
             # The exactly-named process EXISTS but cannot be instrumented: a
             # hardened or SIP-protected binary, a missing entitlement, or denied
             # permission. Retargeting by name here would silently scan a
@@ -160,12 +196,18 @@ class FridaBackend(Backend):
                 f"It is likely hardened or SIP-protected; another process is NOT "
                 f"substituted. Pass an explicit PID to override."
             ) from e
-        else:
-            logger.debug("Attached to '%s'", target)
-            self.set_detached_callback(session, on_detached)
-            return session
+        except Exception as e:
+            # Anything else is a transport/link failure, not a statement about
+            # this process: frida resolves the name by enumerating over the
+            # device link first, so a dead frida-server surfaces here too.
+            # Report it verbatim rather than blaming the target -- but still do
+            # not fall back to a name match, which would attach to the wrong
+            # process on a link that is merely flaky.
+            raise AttachmentError(f"Failed to attach to '{target}': {e}") from e
 
-        return self._attach_by_name_match(device, target, resolve_error, on_detached)
+        logger.debug("Attached to '%s'", target)
+        self.set_detached_callback(session, on_detached)
+        return session
 
     def _attach_by_name_match(
         self,
@@ -262,13 +304,14 @@ class FridaBackend(Backend):
     def _process_name(device: Any, pid: int) -> str | None:
         """Name for *pid*, or None if it cannot be resolved."""
         try:
-            matches = device.enumerate_processes(pids=[pid])
-            if matches:
-                return matches[0].name
-            # Some backends ignore the pids filter; fall back to a full sweep.
-            for proc in device.enumerate_processes():
-                if proc.pid == pid:
-                    return proc.name
+            # Always confirm the pid rather than trusting matches[0]: a backend
+            # that ignores the `pids` filter returns the whole process list, and
+            # taking the first entry would stamp an unrelated process name onto
+            # the result -- exactly the mislabelling this code exists to prevent.
+            for source in (device.enumerate_processes(pids=[pid]), device.enumerate_processes()):
+                for proc in source:
+                    if proc.pid == pid:
+                        return proc.name
         except Exception as e:
             logger.debug("Could not resolve name for PID %d: %s", pid, e)
         return None

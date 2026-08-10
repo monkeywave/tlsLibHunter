@@ -1404,7 +1404,6 @@ class ModuleScanner:
         """Unload the scanner script."""
         self._closing = True  # our own unload/detach is not a crash
         if self._script:
-            with contextlib.suppress(Exception):
-                self._script.unload()
+            self._backend.unload_script(self._script)
             self._script = None
             self._exports = None

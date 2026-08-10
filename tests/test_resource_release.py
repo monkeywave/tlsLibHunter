@@ -21,12 +21,6 @@ from tlslibhunter.backends.base import Backend, ProcessNotFoundError, ScriptErro
 from tlslibhunter.hunter import TLSLibHunter
 from tlslibhunter.utils.process_resolver import is_exact_name, name_matches
 
-
-@pytest.fixture
-def backend():
-    return frida_backend.FridaBackend()
-
-
 # ---------------------------------------------------------------------------
 # spawn(): a suspended target must never be abandoned
 # ---------------------------------------------------------------------------
@@ -232,6 +226,28 @@ def test_close_leaves_a_remote_device_we_did_not_add(backend, monkeypatch):
     backend.close()
 
     manager.remove_remote_device.assert_not_called()
+
+
+def test_a_shared_remote_device_is_not_removed_while_another_backend_uses_it(monkeypatch):
+    """frida's DeviceManager is process-global -- removing the device out from
+    under a second live hunter would kill its scan mid-run."""
+    manager = Mock()
+    fake_frida = Mock()
+    fake_frida.get_device_manager.return_value = manager
+    monkeypatch.setattr(frida_backend, "_import_frida", lambda: fake_frida)
+
+    first = frida_backend.FridaBackend()
+    second = frida_backend.FridaBackend()
+    first.get_device(host="10.0.0.1:27042")
+    # The second registration fails ("already registered") but still takes a ref.
+    manager.add_remote_device.side_effect = RuntimeError("already registered")
+    second.get_device(host="10.0.0.1:27042")
+
+    first.close()
+    manager.remove_remote_device.assert_not_called()  # second is still scanning
+
+    second.close()
+    manager.remove_remote_device.assert_called_once_with("10.0.0.1:27042")
 
 
 def test_close_is_a_noop_for_a_local_backend(backend):

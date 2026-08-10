@@ -76,6 +76,11 @@ class ScanResult:
         """
         if self.attached_process is None:
             return False
+        # str() is load-bearing: `target` is annotated str but nothing enforces
+        # it, and TLSLibHunter(1234) / .run(1234) with an int PID is legal.
+        # config.py coerces the same way for the same reason. Without this,
+        # target_mismatch and to_dict() (i.e. --format json) raise AttributeError
+        # after the whole scan has already completed.
         if str(self.target) == str(self.attached_pid):
             return False  # target was given as a PID
         return self.attached_process.lower() != str(self.target).lower()

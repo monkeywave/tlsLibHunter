@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import abc
-import contextlib
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger("tlslibhunter.backends")
 
 
 class BackendError(Exception):
@@ -76,9 +78,19 @@ class Backend(abc.ABC):
         Returns:
             Session handle.
 
+        Implementations MUST NOT silently substitute a different process for the
+        one named. Specifically: if a process with the requested name exists but
+        cannot be instrumented (hardened binary, missing entitlement, permission
+        denied), raise rather than falling back to a near-match -- otherwise the
+        caller gets a confident answer about the wrong process. A looser
+        name match is only legitimate when no process carries the name, an
+        ambiguous name must be refused, and any retarget must be logged at
+        WARNING so it appears in normal output.
+
         Raises:
             ProcessNotFoundError: If process cannot be found.
-            AttachmentError: If attachment fails.
+            AttachmentError: If attachment fails, or the named process exists
+                but cannot be instrumented, or the name is ambiguous.
         """
 
     @abc.abstractmethod
@@ -164,8 +176,12 @@ class Backend(abc.ABC):
         """
         if script is None:
             return
-        with contextlib.suppress(Exception):
+        try:
             script.unload()
+        except Exception as e:
+            # Swallowed, but not silently: a backend whose script handle has no
+            # unload() would otherwise leak scripts with no trace at all.
+            logger.debug("unload_script: %s: %s", type(e).__name__, e)
 
     def describe_session(self, device: Any, session: Any) -> dict[str, Any] | None:
         """Identify the process a session is really attached to.

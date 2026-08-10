@@ -20,18 +20,39 @@ import pytest
 
 from tlslibhunter.backends import frida_backend
 from tlslibhunter.backends.base import AttachmentError, ProcessNotFoundError
+from tlslibhunter.output._utils import attached_label
+from tlslibhunter.output.plain_formatter import PlainFormatter
 from tlslibhunter.output.table_formatter import result_title
 from tlslibhunter.scanner.results import ScanResult
 
 
 class FridaProcessNotFoundError(Exception):
-    """Stand-in for frida.ProcessNotFoundError."""
+    """Stand-in for frida.ProcessNotFoundError (also raised for ambiguous names)."""
+
+
+class FakeNotSupportedError(Exception):
+    """Stand-in for frida.NotSupportedError -- what a hardened binary raises."""
+
+
+class FakePermissionDeniedError(Exception):
+    """Stand-in for frida.PermissionDeniedError."""
+
+
+class FakeServerNotRunningError(Exception):
+    """Stand-in for frida.ServerNotRunningError -- a LINK failure, not a target one."""
 
 
 class FakeFrida:
-    """Minimal stub of the frida module surface attach() touches."""
+    """Minimal stub of the frida module surface attach() touches.
+
+    The three exception classes are distinct types on purpose: attach() decides
+    whether the target exists-but-is-locked (raise a 'hardened' diagnosis) or
+    the link is broken (report verbatim) purely by exception type.
+    """
 
     ProcessNotFoundError = FridaProcessNotFoundError
+    NotSupportedError = FakeNotSupportedError
+    PermissionDeniedError = FakePermissionDeniedError
 
 
 class FakeProcess:
@@ -44,23 +65,17 @@ class FakeSession:
     def __init__(self, pid):
         self.pid = pid
 
-    def on(self, signal, callback):
-        pass
-
-
-class NativeImpl:
-    def __init__(self, pid):
-        self.pid = pid
-
 
 class WrapperSession:
-    """Mimics frida.core.Session, which does NOT proxy .pid to the native object."""
+    """Mimics frida.core.Session, which does NOT proxy .pid to the native object.
+
+    Kept as an explicit class rather than a Mock: the whole point is the shape
+    (pid reachable only through ``_impl``), and a Mock auto-vivifies ``.pid`` and
+    would pass even if the production code stopped looking at ``_impl``.
+    """
 
     def __init__(self, pid):
-        self._impl = NativeImpl(pid)
-
-    def on(self, signal, callback):
-        pass
+        self._impl = FakeSession(pid)
 
 
 class FakeDevice:
@@ -97,11 +112,6 @@ def _stub_frida(monkeypatch):
     monkeypatch.setattr(frida_backend, "_import_frida", lambda: FakeFrida)
 
 
-@pytest.fixture
-def backend():
-    return frida_backend.FridaBackend()
-
-
 # ---------------------------------------------------------------------------
 # Defect 1 -- a permission failure must never cause a retarget
 # ---------------------------------------------------------------------------
@@ -113,7 +123,7 @@ def test_hardened_target_raises_instead_of_retargeting(backend):
         by_target={
             # What frida really raised: NotSupportedError, which is NOT a
             # subclass of ProcessNotFoundError.
-            "Finder": RuntimeError(
+            "Finder": FakeNotSupportedError(
                 "unexpected error while starting thread (thread_create returned '(os/kern) protection failure')"
             )
         },
@@ -132,6 +142,38 @@ def test_hardened_target_raises_instead_of_retargeting(backend):
     assert 16891 not in device.attach_calls
     # And we did not even go looking for a substitute.
     assert device.enumerate_calls == 0
+
+
+def test_link_failure_is_not_blamed_on_the_target(backend):
+    """A dead frida-server surfaces from attach() too, because frida resolves the
+    name over the device link first. Reporting that as 'hardened or
+    SIP-protected' sends the user down the wrong path entirely."""
+    device = FakeDevice(
+        by_target={"com.example.app": FakeServerNotRunningError("unable to connect to remote frida-server")},
+        enumerated=[FakeProcess("com.example.app.helper", 900)],
+    )
+
+    with pytest.raises(AttachmentError) as excinfo:
+        backend.attach(device, "com.example.app")
+
+    msg = str(excinfo.value)
+    assert "unable to connect to remote frida-server" in msg
+    assert "SIP-protected" not in msg and "hardened" not in msg
+    # Still must not retarget on a flaky link.
+    assert device.enumerate_calls == 0
+
+
+def test_describe_session_rejects_a_backend_that_ignores_the_pid_filter(backend):
+    """Trusting matches[0] would stamp an unrelated process onto the result."""
+
+    class IgnoresPidsFilter(FakeDevice):
+        def enumerate_processes(self, pids=None, scope=None):
+            self.enumerate_calls += 1
+            return list(self._enumerated)  # filter ignored -- full list
+
+    device = IgnoresPidsFilter(enumerated=[FakeProcess("some-unrelated-process", 111), FakeProcess("Finder", 673)])
+
+    assert backend.describe_session(device, FakeSession(673)) == {"pid": 673, "name": "Finder"}
 
 
 def test_pid_target_never_falls_back(backend):
@@ -288,6 +330,52 @@ def test_title_is_quiet_when_the_target_matches():
     title = result_title(result)
     assert title == "TLS Libraries in 'Finder' (PID 673) (macos)"
     assert "REQUESTED" not in title
+
+
+@pytest.mark.parametrize(
+    ("attached_process", "attached_pid", "plain", "quoted"),
+    [
+        ("Finder", 673, "Finder (PID 673)", "'Finder' (PID 673)"),
+        ("Finder", None, "Finder", "'Finder'"),
+        (None, 673, "PID 673", "PID 673"),  # name unresolved, PID still honest
+        (None, None, None, None),  # backend could not identify it at all
+    ],
+)
+def test_attached_label_covers_every_identity_case(attached_process, attached_pid, plain, quoted):
+    """One helper, so the table and plain formatters cannot word this differently."""
+    result = ScanResult(
+        target="Finder",
+        platform="macos",
+        attached_process=attached_process,
+        attached_pid=attached_pid,
+    )
+
+    assert attached_label(result) == plain
+    assert attached_label(result, quote_name=True) == quoted
+
+
+def test_plain_formatter_reports_the_attached_process_and_flags_a_mismatch():
+    """The plain formatter had no coverage at all before this."""
+    result = ScanResult(
+        target="Finder",
+        platform="macos",
+        attached_process="QLMarkdown Preview Extension (Finder)",
+        attached_pid=16891,
+    )
+
+    out = PlainFormatter().format_scan(result)
+
+    assert "Attached to: QLMarkdown Preview Extension (Finder) (PID 16891)" in out
+    assert "WARNING" in out and "NOT the process scanned" in out
+
+
+def test_plain_formatter_is_quiet_when_the_target_matches():
+    result = ScanResult(target="Finder", platform="macos", attached_process="Finder", attached_pid=673)
+
+    out = PlainFormatter().format_scan(result)
+
+    assert "Attached to: Finder (PID 673)" in out
+    assert "WARNING" not in out
 
 
 def test_to_dict_exposes_the_attached_process():

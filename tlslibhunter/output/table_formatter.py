@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tlslibhunter.output._utils import attached_label
 from tlslibhunter.output._utils import human_size as _human_size
 
 if TYPE_CHECKING:
@@ -17,15 +18,9 @@ def result_title(result: ScanResult) -> str:
     heading reports what was scanned and calls out a mismatch explicitly. Falls
     back to the requested target when the backend cannot identify the process.
     """
-    if result.attached_process is None and result.attached_pid is None:
+    where = attached_label(result, quote_name=True)
+    if where is None:
         return f"TLS Libraries in '{result.target}' ({result.platform})"
-    if result.attached_process is not None:
-        where = f"'{result.attached_process}'"
-        if result.attached_pid is not None:
-            where += f" (PID {result.attached_pid})"
-    else:
-        # Name unresolved -- the PID is still the honest identifier.
-        where = f"PID {result.attached_pid}"
     if result.target_mismatch:
         return f"TLS Libraries in {where} ({result.platform}) - REQUESTED '{result.target}'"
     return f"TLS Libraries in {where} ({result.platform})"

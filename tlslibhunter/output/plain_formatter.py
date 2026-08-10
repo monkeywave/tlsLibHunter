@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tlslibhunter.output._utils import attached_label
 from tlslibhunter.output._utils import human_size as _human_size
 
 if TYPE_CHECKING:
@@ -18,13 +19,8 @@ class PlainFormatter:
         lines.append(f"Target: {result.target}")
         # Report the process actually instrumented -- name-based targeting can
         # resolve to one the caller never named.
-        if result.attached_process is not None or result.attached_pid is not None:
-            if result.attached_process is not None:
-                attached = result.attached_process
-                if result.attached_pid is not None:
-                    attached += f" (PID {result.attached_pid})"
-            else:
-                attached = f"PID {result.attached_pid}"
+        attached = attached_label(result)
+        if attached is not None:
             lines.append(f"Attached to: {attached}")
             if result.target_mismatch:
                 lines.append(f"WARNING: '{result.target}' was requested but NOT the process scanned")

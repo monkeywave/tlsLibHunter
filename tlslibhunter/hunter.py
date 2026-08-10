@@ -213,6 +213,11 @@ class TLSLibHunter:
         self._attached = None
         if current is None:
             logger.warning("Target could not be recovered; no session remains for extraction.")
+            # Drop out of the initialized state too. Otherwise extract() short-
+            # circuits in _initialize() and hands session=None to every
+            # extractor, turning one clear failure into N opaque
+            # "NoneType has no attribute create_script" errors.
+            self._initialized = False
             return
         if self._backend is not None:
             self._attached = self._backend.describe_session(self._device, current)

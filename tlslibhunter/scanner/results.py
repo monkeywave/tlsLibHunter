@@ -57,14 +57,35 @@ class ScanResult:
     scan_duration_seconds: float = 0.0
     errors: list[str] = field(default_factory=list)
     pipeline_stats: dict[str, int] = field(default_factory=dict)
+    # The process actually instrumented. ``target`` is what the user asked for;
+    # name-based targeting can land on a different process, so these record the
+    # truth. None when the backend cannot report it.
+    attached_process: str | None = None
+    attached_pid: int | None = None
 
     @property
     def tls_library_count(self) -> int:
         return len(self.libraries)
 
+    @property
+    def target_mismatch(self) -> bool:
+        """True when the instrumented process is not the one named in ``target``.
+
+        A scan of a different process than requested is still valid data, but it
+        answers a different question -- callers must be able to see that.
+        """
+        if self.attached_process is None:
+            return False
+        if str(self.target) == str(self.attached_pid):
+            return False  # target was given as a PID
+        return self.attached_process.lower() != str(self.target).lower()
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
+            "attached_process": self.attached_process,
+            "attached_pid": self.attached_pid,
+            "target_mismatch": self.target_mismatch,
             "platform": self.platform,
             "backend": self.backend,
             "libraries": [lib.to_dict() for lib in self.libraries],

@@ -23,12 +23,34 @@ def resolve_target(target: str) -> int | str:
         return target
 
 
+def is_exact_name(candidate: str, target: str) -> bool:
+    """True when *candidate* is the requested name, ignoring case."""
+    return candidate.lower() == target.lower()
+
+
+def name_matches(candidate: str, target: str) -> bool:
+    """True when either name contains the other, ignoring case.
+
+    Deliberately loose so partial targets ("chrome") resolve. Callers must treat
+    a match as *weaker* than an exact one: this is what let "finder" match
+    "QLMarkdown Preview Extension (Finder)". The single definition lives here so
+    the resolver and the Frida attach path cannot drift apart.
+    """
+    candidate_lower, target_lower = candidate.lower(), target.lower()
+    return target_lower in candidate_lower or candidate_lower in target_lower
+
+
 def find_process(
     backend: Any,
     device: Any,
     target: int | str,
 ) -> dict[str, Any] | None:
     """Find a process on the device by PID or name.
+
+    Exact names win over substring matches. Note this returns the *first*
+    plausible process; the Frida attach path applies a stricter policy on top
+    (it refuses to substitute a process when the exactly-named one exists but
+    cannot be instrumented, and refuses ambiguous names outright).
 
     Args:
         backend: Backend instance
@@ -46,17 +68,14 @@ def find_process(
                 return p
         return None
 
-    target_lower = target.lower()
-
     # Exact match first
     for p in procs:
-        if p["name"].lower() == target_lower:
+        if is_exact_name(p["name"], target):
             return p
 
     # Substring match
     for p in procs:
-        name_lower = p["name"].lower()
-        if target_lower in name_lower or name_lower in target_lower:
+        if name_matches(p["name"], target):
             return p
 
     return None

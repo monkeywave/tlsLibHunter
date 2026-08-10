@@ -66,6 +66,7 @@ class TLSLibHunter:
         self._device = None
         self._session = None
         self._platform: str | None = None
+        self._attached: dict | None = None
         self._initialized = False
 
     @classmethod
@@ -77,6 +78,7 @@ class TLSLibHunter:
         instance._device = None
         instance._session = None
         instance._platform = None
+        instance._attached = None
         instance._initialized = False
         return instance
 
@@ -134,6 +136,16 @@ class TLSLibHunter:
         else:
             self._session = self._backend.attach(self._device, target, timeout=self._config.timeout)
 
+        # Record what was ACTUALLY instrumented. Name-based targeting can land on
+        # a process the caller never named, and results must say which one.
+        self._attached = self._backend.describe_session(self._device, self._session)
+        if self._attached:
+            logger.info(
+                "Instrumenting '%s' (PID %s)",
+                self._attached.get("name") or "?",
+                self._attached.get("pid"),
+            )
+
         self._initialized = True
 
     def scan(self) -> ScanResult:
@@ -175,10 +187,55 @@ class TLSLibHunter:
 
         try:
             result = scanner.scan(self._config.target)
-            result.backend = self._config.backend
-            return result
         finally:
+            # Adopt whatever session the scanner ended up on. Crash recovery
+            # (_reattach) re-spawns the target and replaces it, and extract()
+            # short-circuits on _initialized -- so without this, extraction after
+            # a recovery would silently run against the dead original session.
+            # Runs before cleanup() and on the error path too.
+            self._adopt_scanner_session(scanner)
             scanner.cleanup()
+
+        # Labelled after adoption so a recovered scan reports the process the
+        # results actually came from.
+        result.backend = self._config.backend
+        self._label_attached_process(result)
+        return result
+
+    def _adopt_scanner_session(self, scanner) -> None:
+        """Re-read the scanner's session and refresh the attached-process label."""
+        current = getattr(scanner, "session", None)
+        if current is self._session:
+            return
+        self._session = current
+        # The recovered session is a different process instance, so the recorded
+        # identity no longer applies.
+        self._attached = None
+        if current is None:
+            logger.warning("Target could not be recovered; no session remains for extraction.")
+            return
+        if self._backend is not None:
+            self._attached = self._backend.describe_session(self._device, current)
+
+    def _label_attached_process(self, result: ScanResult) -> None:
+        """Stamp the result with the process actually instrumented, and warn on a mismatch.
+
+        Without this the table is titled with the *requested* name, so a scan
+        that landed on a different process reads as though it were the intended
+        one.
+        """
+        if not self._attached:
+            return
+        result.attached_process = self._attached.get("name")
+        result.attached_pid = self._attached.get("pid")
+        if result.target_mismatch:
+            logger.warning(
+                "Requested '%s' but instrumented '%s' (PID %s) - the results below describe that process, not '%s'.",
+                result.target,
+                result.attached_process,
+                result.attached_pid,
+                result.target,
+            )
 
     def extract(
         self,
@@ -227,10 +284,21 @@ class TLSLibHunter:
         return results
 
     def close(self) -> None:
-        """Clean up: detach session."""
-        if self._session and self._backend:
+        """Detach the session and release the backend and device.
+
+        Idempotent, and re-openable: _initialize() rebuilds the backend and
+        device from scratch, so `with TLSLibHunter(...)` twice in one process
+        still works. Nothing process-global is torn down here for exactly that
+        reason.
+        """
+        if self._session is not None and self._backend is not None:
             self._backend.detach(self._session)
-            self._session = None
+        self._session = None
+        if self._backend is not None:
+            self._backend.close()
+        self._backend = None
+        self._device = None
+        self._attached = None
         self._initialized = False
 
     def __enter__(self) -> TLSLibHunter:

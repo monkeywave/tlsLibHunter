@@ -553,6 +553,13 @@ class ModuleScanner:
         self._closing = True
         with contextlib.suppress(Exception):
             self.cleanup()
+        # cleanup() only unloads the script. Release the dead session too, and
+        # clear it before re-spawning: if the spawn below fails, the caller must
+        # see an honest None rather than a corpse it would keep using.
+        if self._session is not None:
+            with contextlib.suppress(Exception):
+                self._backend.detach(self._session)
+            self._session = None
         self._closing = False
         self._detach_info = {"detached": False, "reason": None, "crash": None}
         try:
@@ -1381,6 +1388,17 @@ class ModuleScanner:
                 len(hidden_low),
                 len(hidden_fp),
             )
+
+    @property
+    def session(self) -> Any:
+        """The session this scanner is currently bound to.
+
+        Not necessarily the session passed to ``__init__``: process-death
+        recovery (``_reattach``) replaces it, and is None if a re-spawn failed.
+        Callers that outlive the scan -- extraction in particular -- must re-read
+        this afterwards instead of reusing the session they handed in.
+        """
+        return self._session
 
     def cleanup(self) -> None:
         """Unload the scanner script."""

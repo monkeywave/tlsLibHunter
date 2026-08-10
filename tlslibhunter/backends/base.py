@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 from typing import Any, Callable
 
 
@@ -137,6 +138,49 @@ class Backend(abc.ABC):
         Args:
             session: Session handle from attach() or spawn().
             callback: Invoked when the session detaches. Signature: ``cb(reason, crash)``.
+        """
+        return None
+
+    def close(self) -> None:
+        """Release resources owned by this backend *instance*. Idempotent.
+
+        Scope is the instance, not the process: anything process-global (such as
+        Frida's module-level device manager) must outlive a single run, so it is
+        deliberately out of scope here.
+
+        Default no-op: backends holding no per-instance state need nothing.
+        """
+        return None
+
+    def unload_script(self, script: Any) -> None:
+        """Unload a script, best-effort.
+
+        Tolerates ``None`` and an already-dead script so callers can put it in a
+        ``finally`` without guarding. Teardown must never mask the original
+        failure it is cleaning up after.
+
+        Args:
+            script: Script handle from create_script(), or None.
+        """
+        if script is None:
+            return
+        with contextlib.suppress(Exception):
+            script.unload()
+
+    def describe_session(self, device: Any, session: Any) -> dict[str, Any] | None:
+        """Identify the process a session is really attached to.
+
+        Name-based targeting can resolve to a process the caller did not name,
+        so results must be labelled with what was actually instrumented rather
+        than with what was requested.
+
+        Args:
+            device: Device handle from get_device().
+            session: Session handle from attach() or spawn().
+
+        Returns:
+            ``{"pid": int, "name": str | None}``, or None when the backend
+            cannot determine it. Default: None.
         """
         return None
 

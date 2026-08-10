@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import threading
@@ -71,6 +70,7 @@ class IOSExtractor(Extractor):
                 elif payload.get("type") == "error":
                     state["error"] = payload.get("message", "Unknown")
 
+        script = None
         try:
             with open(_EXTRACTOR_JS) as f:
                 js_source = f.read()
@@ -84,9 +84,6 @@ class IOSExtractor(Extractor):
 
             if state["file"]:
                 state["file"].close()
-
-            with contextlib.suppress(Exception):
-                script.unload()
 
             if state["failed"]:
                 if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
@@ -116,3 +113,7 @@ class IOSExtractor(Extractor):
                 method=self.method_name,
                 error=str(e),
             )
+        finally:
+            # In a finally, not after the exports call: a raising read_file_chunks
+            # used to skip the unload and strand the script in the target.
+            backend.unload_script(script)

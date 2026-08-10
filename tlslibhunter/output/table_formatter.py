@@ -10,6 +10,27 @@ if TYPE_CHECKING:
     from tlslibhunter.scanner.results import ExtractionResult, ScanResult
 
 
+def result_title(result: ScanResult) -> str:
+    """Heading naming the process that was actually instrumented.
+
+    Name-based targeting can resolve to a process the caller never named, so the
+    heading reports what was scanned and calls out a mismatch explicitly. Falls
+    back to the requested target when the backend cannot identify the process.
+    """
+    if result.attached_process is None and result.attached_pid is None:
+        return f"TLS Libraries in '{result.target}' ({result.platform})"
+    if result.attached_process is not None:
+        where = f"'{result.attached_process}'"
+        if result.attached_pid is not None:
+            where += f" (PID {result.attached_pid})"
+    else:
+        # Name unresolved -- the PID is still the honest identifier.
+        where = f"PID {result.attached_pid}"
+    if result.target_mismatch:
+        return f"TLS Libraries in {where} ({result.platform}) - REQUESTED '{result.target}'"
+    return f"TLS Libraries in {where} ({result.platform})"
+
+
 class TableFormatter:
     """Format scan results as a rich table."""
 
@@ -28,7 +49,7 @@ class TableFormatter:
         buf = StringIO()
         console = Console(file=buf, force_terminal=True)
 
-        table = Table(title=f"TLS Libraries in '{result.target}' ({result.platform})")
+        table = Table(title=result_title(result))
         table.add_column("#", style="dim", width=4)
         table.add_column("Library", style="cyan")
         table.add_column("Type", style="green")
@@ -58,7 +79,7 @@ class TableFormatter:
 
     def _format_plain_fallback(self, result: ScanResult) -> str:
         lines = []
-        lines.append(f"TLS Libraries in '{result.target}' ({result.platform})")
+        lines.append(result_title(result))
         lines.append("=" * 80)
         for i, lib in enumerate(result.libraries, 1):
             lib_display = f"{lib.library_type} ({lib.detected_version})" if lib.detected_version else lib.library_type

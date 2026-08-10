@@ -16,6 +16,18 @@ class PlainFormatter:
     def format_scan(self, result: ScanResult) -> str:
         lines = []
         lines.append(f"Target: {result.target}")
+        # Report the process actually instrumented -- name-based targeting can
+        # resolve to one the caller never named.
+        if result.attached_process is not None or result.attached_pid is not None:
+            if result.attached_process is not None:
+                attached = result.attached_process
+                if result.attached_pid is not None:
+                    attached += f" (PID {result.attached_pid})"
+            else:
+                attached = f"PID {result.attached_pid}"
+            lines.append(f"Attached to: {attached}")
+            if result.target_mismatch:
+                lines.append(f"WARNING: '{result.target}' was requested but NOT the process scanned")
         lines.append(f"Platform: {result.platform}")
         lines.append(f"TLS libraries found: {result.tls_library_count}")
         lines.append("")

@@ -106,6 +106,7 @@ class MemoryExtractor(Extractor):
                 dump_state["error"] = payload.get("message", "Unknown error")
                 logger.warning("Dump error for %s: %s", library.name, dump_state["error"])
 
+        script = None
         try:
             with open(_EXTRACTOR_JS) as f:
                 js_source = f.read()
@@ -122,9 +123,6 @@ class MemoryExtractor(Extractor):
             if dump_state["file"]:
                 dump_state["file"].close()
                 dump_state["file"] = None
-
-            with contextlib.suppress(Exception):
-                script.unload()
 
             received = dump_state["received"]
             expected = dump_state["expected_size"] or 0
@@ -171,3 +169,8 @@ class MemoryExtractor(Extractor):
             msg = f"Memory dump failed: {e}"
             logger.error(msg)
             return ExtractionResult(library=library, success=False, method=self.method_name, error=msg)
+        finally:
+            # The unload used to sit inside the try, after the exports call --
+            # so the most likely failure (the dump RPC raising) skipped it and
+            # left the script resident in the target for the rest of the run.
+            backend.unload_script(script)

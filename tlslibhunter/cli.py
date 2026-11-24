@@ -6,6 +6,7 @@ import argparse
 import logging
 import re
 import sys
+import traceback
 from datetime import datetime
 
 from tlslibhunter.about import __version__
@@ -36,6 +37,11 @@ class _TeeStream:
         self._original.flush()
         self._log.flush()
 
+    def write_log_only(self, s: str) -> None:
+        """Persist text to the debug log file without echoing it to the terminal."""
+        self._log.write(_ANSI_RE.sub("", s))
+        self._log.flush()
+
     def __getattr__(self, attr):
         return getattr(self._original, attr)
 
@@ -55,6 +61,18 @@ def _setup_debug_log_file(target: str) -> str | None:
     sys.stdout = _TeeStream(sys.stdout, log_fh)
     sys.stderr = _TeeStream(sys.stderr, log_fh)
     return log_path
+
+
+def _write_traceback_to_debug_log() -> bool:
+    """Write the active exception's traceback to the -d log file only.
+
+    The debug log is a tee of stderr, so logging the traceback normally would
+    also flood the terminal. Returns False when no debug log file is active.
+    """
+    if not isinstance(sys.stderr, _TeeStream):
+        return False
+    sys.stderr.write_log_only(traceback.format_exc())
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,6 +112,12 @@ examples:
     )
     p.add_argument("--host", default=None, help="Remote Frida device (ip:port)")
     p.add_argument("-s", "--spawn", action="store_true", help="Spawn process instead of attach")
+    p.add_argument(
+        "--unfreeze",
+        action="store_true",
+        help="Android (root): if attaching times out because the app is frozen by the "
+        "cached-apps freezer, unfreeze it and retry once",
+    )
     p.add_argument("-d", "--debug", action="store_true", help="Debug output")
     p.add_argument("-v", "--verbose", action="store_true", help="Show all scanned modules")
     p.add_argument("--backend", choices=["frida"], default="frida", help="Instrumentation backend (default: frida)")
@@ -156,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     if log_path:
         logging.getLogger("tlslibhunter").info("Debug log: %s", log_path)
 
+    from tlslibhunter.backends.base import BackendError
     from tlslibhunter.config import HunterConfig
     from tlslibhunter.hunter import TLSLibHunter
     from tlslibhunter.output import get_formatter
@@ -172,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         serial=args.serial,
         host=args.host,
         spawn=args.spawn,
+        unfreeze=args.unfreeze,
         backend=args.backend,
         timeout=args.timeout,
         list_only=args.list_only,
@@ -231,6 +257,15 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
+    except BackendError as e:
+        # Expected user-facing failure (process/device not found, attach
+        # refused): one clean line on the terminal; the traceback goes to the
+        # debug log file only.
+        logger = logging.getLogger("tlslibhunter")
+        logger.error("Error: %s", e)
+        if args.debug and _write_traceback_to_debug_log():
+            logger.debug("Full traceback written to debug log: %s", log_path)
+        return 1
     except Exception as e:
         logging.getLogger("tlslibhunter").error("Error: %s", e)
         if args.debug:

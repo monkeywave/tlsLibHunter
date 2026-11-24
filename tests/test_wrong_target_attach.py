@@ -19,7 +19,7 @@ import logging
 import pytest
 
 from tlslibhunter.backends import frida_backend
-from tlslibhunter.backends.base import AttachmentError, ProcessNotFoundError
+from tlslibhunter.backends.base import AttachmentError, AttachTimeoutError, ProcessNotFoundError
 from tlslibhunter.output._utils import attached_label
 from tlslibhunter.output.plain_formatter import PlainFormatter
 from tlslibhunter.output.table_formatter import result_title
@@ -42,6 +42,14 @@ class FakeServerNotRunningError(Exception):
     """Stand-in for frida.ServerNotRunningError -- a LINK failure, not a target one."""
 
 
+class FakeTimedOutError(Exception):
+    """Stand-in for frida.TimedOutError -- ptrace could not stop a frozen process."""
+
+
+class FakeTransportError(Exception):
+    """Stand-in for frida.TransportError -- frida 17.26+ also reports a frozen process this way."""
+
+
 class FakeFrida:
     """Minimal stub of the frida module surface attach() touches.
 
@@ -53,10 +61,21 @@ class FakeFrida:
     ProcessNotFoundError = FridaProcessNotFoundError
     NotSupportedError = FakeNotSupportedError
     PermissionDeniedError = FakePermissionDeniedError
+    TimedOutError = FakeTimedOutError
+    TransportError = FakeTransportError
 
 
 class FakeProcess:
     def __init__(self, name, pid):
+        self.name = name
+        self.pid = pid
+
+
+class FakeApp:
+    """Stand-in for frida.Application: pid is 0 when the app is not running."""
+
+    def __init__(self, identifier, name, pid=0):
+        self.identifier = identifier
         self.name = name
         self.pid = pid
 
@@ -83,13 +102,35 @@ class FakeDevice:
 
     ``by_target`` maps a name/PID to either an exception instance to raise or a
     FakeSession to return. ``enumerated`` backs enumerate_processes().
+    ``apps`` backs enumerate_applications(); pass an exception instance to make
+    app enumeration fail. ``spawn_pid`` is what spawn() returns.
     """
 
-    def __init__(self, by_target=None, enumerated=None):
+    def __init__(self, by_target=None, enumerated=None, apps=None, spawn_pid=5000):
         self._by_target = by_target or {}
         self._enumerated = enumerated or []
+        self._apps = apps if apps is not None else []
+        self._spawn_pid = spawn_pid
         self.attach_calls = []
         self.enumerate_calls = 0
+        self.spawn_calls = []
+        self.resumed = []
+        self.killed = []
+
+    def enumerate_applications(self, identifiers=None, scope=None):
+        if isinstance(self._apps, BaseException):
+            raise self._apps
+        return list(self._apps)
+
+    def spawn(self, argv):
+        self.spawn_calls.append(list(argv))
+        return self._spawn_pid
+
+    def resume(self, pid):
+        self.resumed.append(pid)
+
+    def kill(self, pid):
+        self.killed.append(pid)
 
     def attach(self, target):
         self.attach_calls.append(target)
@@ -230,8 +271,146 @@ def test_no_candidates_lists_running_processes(backend):
     with pytest.raises(ProcessNotFoundError) as excinfo:
         backend.attach(device, "nonexistent-xyz")
 
-    assert "Available processes" in str(excinfo.value)
-    assert "systemd (PID 1)" in str(excinfo.value)
+    msg = str(excinfo.value)
+    assert "Available processes" not in msg
+    assert "systemd (PID 1)" not in msg
+    assert "no installed app matches" in msg
+    assert "frida-ps" in msg
+
+
+def test_no_candidates_lists_running_apps(backend):
+    """The user still learns what IS running -- the apps, not init/logd/vold."""
+    device = FakeDevice(
+        enumerated=[FakeProcess("init", 1), FakeProcess("logd", 2)],
+        apps=[
+            FakeApp("com.android.chrome", "Chrome", pid=3100),
+            FakeApp("com.google.android.youtube", "YouTube", pid=0),
+        ],
+    )
+
+    with pytest.raises(ProcessNotFoundError) as excinfo:
+        backend.attach(device, "nonexistent-xyz")
+
+    msg = str(excinfo.value)
+    assert "Running apps:" in msg
+    assert "Chrome (com.android.chrome, PID 3100)" in msg
+    assert "YouTube" not in msg  # installed but not running
+    assert "init (PID 1)" not in msg
+    assert "frida-ps -Uai" in msg
+
+
+# ---------------------------------------------------------------------------
+# Mobile apps -- labels and identifiers are not process names
+# ---------------------------------------------------------------------------
+
+GEMINI = "com.google.android.apps.bard"
+
+
+def test_installed_but_not_running_app_says_so(backend):
+    """The Gemini repro: label given, app installed, no process running."""
+    device = FakeDevice(
+        enumerated=[FakeProcess("init", 1), FakeProcess("logd", 2), FakeProcess("vold", 3)],
+        apps=[FakeApp(GEMINI, "Gemini", pid=0), FakeApp("com.android.chrome", "Chrome", pid=3100)],
+    )
+
+    with pytest.raises(ProcessNotFoundError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    msg = str(excinfo.value)
+    assert "installed" in msg and "not running" in msg
+    assert GEMINI in msg
+    assert "-s" in msg and f"tlsLibHunter -m -s {GEMINI}" in msg
+    assert "init" not in msg and "logd" not in msg
+    assert device.attach_calls == ["Gemini"]
+
+
+def test_several_installed_apps_are_all_listed(backend):
+    device = FakeDevice(
+        apps=[FakeApp("com.example.notes", "Notes"), FakeApp("com.other.notes", "Notes")],
+    )
+
+    with pytest.raises(ProcessNotFoundError) as excinfo:
+        backend.attach(device, "Notes")
+
+    msg = str(excinfo.value)
+    assert "com.example.notes" in msg and "com.other.notes" in msg
+
+
+def test_identifier_attaches_to_running_app_and_warns(backend, caplog):
+    """The process is named differently from the identifier the user typed."""
+    session = FakeSession(4321)
+    device = FakeDevice(
+        by_target={4321: session},
+        enumerated=[FakeProcess("Gemini", 4321)],
+        apps=[FakeApp(GEMINI, "Gemini", pid=4321)],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="tlslibhunter.backends.frida"):
+        assert backend.attach(device, GEMINI) is session
+
+    assert device.attach_calls == [GEMINI, 4321]
+    assert f"attached to app 'Gemini' ({GEMINI}, PID 4321)" in caplog.text
+    assert "Results describe THAT process" in caplog.text
+
+
+def test_running_app_attach_failure_raises_attachment_error(backend):
+    device = FakeDevice(
+        by_target={4321: RuntimeError("access denied")},
+        apps=[FakeApp(GEMINI, "Gemini", pid=4321)],
+    )
+
+    with pytest.raises(AttachmentError) as excinfo:
+        backend.attach(device, GEMINI)
+
+    assert "access denied" in str(excinfo.value)
+
+
+def test_app_enumeration_failure_still_reports_not_found(backend):
+    device = FakeDevice(apps=RuntimeError("not supported"))
+
+    with pytest.raises(ProcessNotFoundError) as excinfo:
+        backend.attach(device, "nonexistent-xyz")
+
+    assert "frida-ps" in str(excinfo.value)
+
+
+def test_spawn_resolves_label_to_identifier(backend):
+    session = FakeSession(5000)
+    device = FakeDevice(by_target={5000: session}, apps=[FakeApp(GEMINI, "Gemini")])
+
+    assert backend.spawn(device, "Gemini") is session
+
+    assert device.spawn_calls == [[GEMINI]]
+    assert device.resumed == [5000]
+
+
+def test_spawn_keeps_identifier_unchanged(backend):
+    session = FakeSession(5000)
+    device = FakeDevice(by_target={5000: session}, apps=[FakeApp(GEMINI, "Gemini")])
+
+    assert backend.spawn(device, GEMINI) is session
+
+    assert device.spawn_calls == [[GEMINI]]
+
+
+def test_spawn_uses_raw_target_when_app_enumeration_fails(backend):
+    """Desktop devices cannot enumerate apps -- spawn the binary as given."""
+    session = FakeSession(5000)
+    device = FakeDevice(by_target={5000: session}, apps=RuntimeError("not supported"))
+
+    assert backend.spawn(device, "/usr/bin/curl") is session
+
+    assert device.spawn_calls == [["/usr/bin/curl"]]
+
+
+def test_spawn_refuses_ambiguous_label(backend):
+    device = FakeDevice(apps=[FakeApp("com.example.notes", "Notes"), FakeApp("com.other.notes", "Notes")])
+
+    with pytest.raises(ProcessNotFoundError) as excinfo:
+        backend.spawn(device, "Notes")
+
+    assert "ambiguous" in str(excinfo.value)
+    assert device.spawn_calls == []
 
 
 def test_exact_name_attaches_without_enumerating(backend):
@@ -392,3 +571,174 @@ def test_to_dict_exposes_the_attached_process():
     assert payload["target_mismatch"] is True
     # `target` keeps recording the request, so existing consumers are unaffected.
     assert payload["target"] == "Finder"
+
+
+# ---------------------------------------------------------------------------
+# Frida attach timeouts are reported as Frida-level failures
+# ---------------------------------------------------------------------------
+
+FROZEN_TIMEOUT = "unexpectedly timed out while waiting for stop from process with PID 3934"
+
+
+class IdentifiedDevice(FakeDevice):
+    """FakeDevice that carries a frida-style ``id`` and supports get_process()."""
+
+    id = "emulator-5554"
+
+    def get_process(self, name):
+        for proc in self._enumerated:
+            if proc.name == name:
+                return proc
+        raise FridaProcessNotFoundError(f"unable to find process with name '{name}'")
+
+
+def test_pid_target_timeout_raises_attach_timeout_error(backend):
+    device = FakeDevice(by_target={3934: FakeTimedOutError(FROZEN_TIMEOUT)})
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, 3934)
+
+    err = excinfo.value
+    assert isinstance(err, AttachmentError)
+    assert err.pid == 3934
+    assert err.target == 3934
+    assert "Frida" in str(err)
+    assert "not a tlsLibHunter bug" in str(err)
+    assert "-D" not in str(err)  # FakeDevice has no id
+
+
+def test_exact_name_timeout_resolves_pid_via_get_process(backend):
+    device = IdentifiedDevice(
+        by_target={"Gemini": FakeTimedOutError("unexpectedly timed out")},
+        enumerated=[FakeProcess("Gemini", 3934)],
+    )
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    err = excinfo.value
+    assert err.pid == 3934
+    assert err.target == "Gemini"
+    assert "(PID 3934)" in str(err)
+    assert "frida -D emulator-5554 Gemini" in str(err)
+    # A timeout must not trigger the loose name-match fallback.
+    assert device.attach_calls == ["Gemini"]
+
+
+def test_exact_name_timeout_parses_pid_from_frida_message(backend):
+    device = FakeDevice(by_target={"Gemini": FakeTimedOutError(FROZEN_TIMEOUT)})
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    assert excinfo.value.pid == 3934
+    assert "Frida" in str(excinfo.value)
+
+
+def test_exact_name_timeout_without_pid_omits_it(backend):
+    device = FakeDevice(by_target={"Gemini": FakeTimedOutError("unexpectedly timed out")})
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    assert excinfo.value.pid is None
+    assert "(PID" not in str(excinfo.value)
+
+
+def test_app_path_timeout_raises_attach_timeout_error_with_app_pid(backend):
+    device = FakeDevice(
+        by_target={4321: FakeTimedOutError("unexpectedly timed out")},
+        apps=[FakeApp(GEMINI, "Gemini", pid=4321)],
+    )
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, GEMINI)
+
+    err = excinfo.value
+    assert isinstance(err, AttachmentError)
+    assert err.pid == 4321
+    assert "Frida" in str(err)
+
+
+def test_timeout_class_missing_from_frida_falls_back_to_generic_error(backend, monkeypatch):
+    class FridaWithoutTimedOut:
+        ProcessNotFoundError = FridaProcessNotFoundError
+        NotSupportedError = FakeNotSupportedError
+        PermissionDeniedError = FakePermissionDeniedError
+
+    monkeypatch.setattr(frida_backend, "_import_frida", lambda: FridaWithoutTimedOut)
+    device = FakeDevice(by_target={3934: FakeTimedOutError(FROZEN_TIMEOUT)})
+
+    with pytest.raises(AttachmentError) as excinfo:
+        backend.attach(device, 3934)
+
+    assert not isinstance(excinfo.value, AttachTimeoutError)
+
+
+# frida 17.26+ reports a frozen process as ``TransportError: timeout was reached``.
+TRANSPORT_TIMEOUT = "timeout was reached"
+
+
+def test_pid_target_transport_timeout_raises_attach_timeout_error(backend):
+    device = FakeDevice(by_target={6818: FakeTransportError(TRANSPORT_TIMEOUT)})
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, 6818)
+
+    assert excinfo.value.pid == 6818
+    assert excinfo.value.target == 6818
+    assert "Frida" in str(excinfo.value)
+
+
+def test_exact_name_transport_timeout_raises_attach_timeout_error(backend):
+    device = IdentifiedDevice(
+        by_target={"Gemini": FakeTransportError(TRANSPORT_TIMEOUT)},
+        enumerated=[FakeProcess("Gemini", 6818)],
+    )
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    assert excinfo.value.pid == 6818
+    assert excinfo.value.target == "Gemini"
+    # A timeout must not trigger the loose name-match fallback.
+    assert device.attach_calls == ["Gemini"]
+
+
+def test_app_path_transport_timeout_raises_attach_timeout_error(backend):
+    device = FakeDevice(
+        by_target={6818: FakeTransportError(TRANSPORT_TIMEOUT)},
+        apps=[FakeApp(GEMINI, "Gemini", pid=6818)],
+    )
+
+    with pytest.raises(AttachTimeoutError) as excinfo:
+        backend.attach(device, GEMINI)
+
+    assert excinfo.value.pid == 6818
+
+
+def test_pid_target_non_timeout_transport_error_is_plain_attachment_error(backend):
+    device = FakeDevice(by_target={6818: FakeTransportError("connection closed")})
+
+    with pytest.raises(AttachmentError) as excinfo:
+        backend.attach(device, 6818)
+
+    assert not isinstance(excinfo.value, AttachTimeoutError)
+    assert "connection closed" in str(excinfo.value)
+
+
+def test_exact_name_non_timeout_transport_error_is_plain_attachment_error(backend):
+    device = FakeDevice(by_target={"Gemini": FakeTransportError("connection closed")})
+
+    with pytest.raises(AttachmentError) as excinfo:
+        backend.attach(device, "Gemini")
+
+    assert not isinstance(excinfo.value, AttachTimeoutError)
+    assert "connection closed" in str(excinfo.value)
+
+
+def test_is_attach_timeout_classification():
+    assert frida_backend._is_attach_timeout(FakeFrida, FakeTimedOutError("x"))
+    assert frida_backend._is_attach_timeout(FakeFrida, FakeTransportError("Timeout was reached"))
+    assert not frida_backend._is_attach_timeout(FakeFrida, FakeTransportError("connection closed"))
+    assert not frida_backend._is_attach_timeout(FakeFrida, RuntimeError("timeout was reached"))

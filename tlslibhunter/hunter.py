@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tlslibhunter.config import HunterConfig
 from tlslibhunter.scanner.results import ExtractionResult, ScanResult
@@ -134,7 +134,7 @@ class TLSLibHunter:
         if self._config.spawn:
             self._session = self._backend.spawn(self._device, str(target), timeout=self._config.timeout)
         else:
-            self._session = self._backend.attach(self._device, target, timeout=self._config.timeout)
+            self._session = self._attach_with_timeout_handling(target)
 
         # Record what was ACTUALLY instrumented. Name-based targeting can land on
         # a process the caller never named, and results must say which one.
@@ -147,6 +147,38 @@ class TLSLibHunter:
             )
 
         self._initialized = True
+
+    def _attach_with_timeout_handling(self, target: int | str) -> Any:
+        """Attach; on an Android Frida timeout, diagnose it or (with --unfreeze) fix it.
+
+        A process frozen by Android's cached-apps freezer cannot handle the
+        ptrace stop Frida waits for, so the attach times out. Unfreezing needs
+        root and changes device state, hence it is opt-in.
+        """
+        from tlslibhunter.backends.base import AttachTimeoutError
+
+        try:
+            return self._backend.attach(self._device, target, timeout=self._config.timeout)
+        except AttachTimeoutError as e:
+            if self._platform != "android" or e.pid is None:
+                raise
+            return self._recover_android_attach_timeout(e)
+
+    def _recover_android_attach_timeout(self, error: Any) -> Any:
+        """Unfreeze and retry once when allowed; otherwise re-raise with a diagnosis."""
+        from tlslibhunter.backends.base import AttachTimeoutError
+        from tlslibhunter.utils import android_process
+
+        pid = error.pid
+        serial = self._config.device_serial or getattr(self._device, "id", None)
+        if self._config.unfreeze and android_process.read_freeze_state(pid, serial):
+            if android_process.unfreeze(pid, serial):
+                logger.warning("Unfroze PID %d (Android cached-apps freezer); Android may re-freeze it.", pid)
+                return self._backend.attach(self._device, pid, timeout=self._config.timeout)
+            logger.warning("Could not unfreeze PID %d (root required).", pid)
+
+        hint = android_process.diagnose_attach_timeout(pid, serial)
+        raise AttachTimeoutError(f"{error}\n{hint}", target=error.target, pid=pid) from error
 
     def scan(self) -> ScanResult:
         """Scan the target process for TLS libraries.

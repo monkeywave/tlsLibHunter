@@ -29,6 +29,19 @@ class AttachmentError(BackendError):
     """Raised when attachment to a process fails."""
 
 
+class AttachTimeoutError(AttachmentError):
+    """Raised when Frida times out attaching (ptrace could not stop the process).
+
+    This is a Frida-level failure -- typically a frozen or unresponsive app --
+    not a tlsLibHunter bug. ``target`` and ``pid`` describe what was attempted.
+    """
+
+    def __init__(self, message: str, *, target: str | int | None = None, pid: int | None = None) -> None:
+        super().__init__(message)
+        self.target = target
+        self.pid = pid
+
+
 class Backend(abc.ABC):
     """Abstract instrumentation backend.
 

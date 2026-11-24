@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import threading
 from typing import Any, Callable
 
 from tlslibhunter.backends.base import (
     AttachmentError,
+    AttachTimeoutError,
     Backend,
     DeviceNotFoundError,
     ProcessNotFoundError,
@@ -70,6 +72,57 @@ def _forward_agent_log(level: str, text: str) -> None:
     ranges) while leaving stdout to carry only the result.
     """
     agent_logger.log(_AGENT_LOG_LEVELS.get(level, logging.INFO), "%s", text)
+
+
+class _NeverRaised(Exception):
+    """Placeholder for frida exception classes absent from a (fake) frida module."""
+
+
+def _timed_out_error(frida: Any) -> type[BaseException]:
+    """``frida.TimedOutError``, or a class nothing raises if the module lacks it."""
+    return getattr(frida, "TimedOutError", _NeverRaised)
+
+
+def _is_attach_timeout(frida: Any, error: Exception) -> bool:
+    """True when an attach failed because Frida timed out waiting on the process.
+
+    Older frida reports this as ``TimedOutError`` ("timed out while waiting for
+    stop from process"); frida 17.26+ reports the same frozen-process case as
+    ``TransportError: timeout was reached``.
+    """
+    if isinstance(error, _timed_out_error(frida)):
+        return True
+    transport_error = getattr(frida, "TransportError", _NeverRaised)
+    return isinstance(error, transport_error) and "timeout" in str(error).lower()
+
+
+_PID_IN_MESSAGE = re.compile(r"PID (\d+)")
+
+
+def _resolve_pid_for_timeout(device: Any, target: str, error: Exception) -> int | None:
+    """Best-effort PID for a named target whose attach timed out."""
+    try:
+        return int(device.get_process(target).pid)
+    except Exception:
+        match = _PID_IN_MESSAGE.search(str(error))
+        return int(match.group(1)) if match else None
+
+
+def _attach_timeout_message(device: Any, target: str | int, pid: int | None, error: Exception) -> str:
+    """Explain a Frida attach timeout as the Frida-level failure it is."""
+    pid_part = f" (PID {pid})" if pid is not None else ""
+    device_id = getattr(device, "id", None)
+    device_part = f"-D {device_id} " if device_id else ""
+    return (
+        f"Frida timed out attaching to '{target}'{pid_part}: {error}. "
+        f"This is a Frida-level failure: ptrace could not stop the process, so plain "
+        f"`frida {device_part}{target}` fails the same way. It is not a tlsLibHunter bug."
+    )
+
+
+def _attach_timeout_error(device: Any, target: str | int, pid: int | None, error: Exception) -> AttachTimeoutError:
+    """Build the AttachTimeoutError for a timed-out attach to *target*."""
+    return AttachTimeoutError(_attach_timeout_message(device, target, pid, error), target=target, pid=pid)
 
 
 def _import_frida():
@@ -169,6 +222,8 @@ class FridaBackend(Backend):
             try:
                 session = device.attach(target)
             except Exception as e:
+                if _is_attach_timeout(frida, e):
+                    raise _attach_timeout_error(device, target, target, e) from e
                 raise AttachmentError(f"Failed to attach to PID {target}: {e}") from e
             logger.debug("Attached to PID %d", target)
             self.set_detached_callback(session, on_detached)
@@ -197,6 +252,11 @@ class FridaBackend(Backend):
                 f"substituted. Pass an explicit PID to override."
             ) from e
         except Exception as e:
+            if _is_attach_timeout(frida, e):
+                # The exactly-named process exists but Frida could not stop it
+                # (typically a frozen app). Say plainly that this is Frida-level.
+                pid = _resolve_pid_for_timeout(device, target, e)
+                raise _attach_timeout_error(device, target, pid, e) from e
             # Anything else is a transport/link failure, not a statement about
             # this process: frida resolves the name by enumerating over the
             # device link first, so a dead frida-server surfaces here too.
@@ -242,11 +302,10 @@ class FridaBackend(Backend):
 
         candidates = [p for p in procs if name_matches(p.name, target)]
         if not candidates:
-            # Preserved from the original: show the user what IS running.
-            proc_names = [f"{p.name} (PID {p.pid})" for p in procs[:20]]
-            raise ProcessNotFoundError(
-                f"Process '{target}' not found. Available processes:\n  " + "\n  ".join(proc_names)
-            )
+            # No process matches -- but on mobile the user usually names an app
+            # by its label ("Gemini") or identifier, neither of which is the
+            # process name. Consult the installed apps before giving up.
+            return self._attach_by_application(device, target, on_detached)
 
         alternatives = ", ".join(f"{p.name} (PID {p.pid})" for p in candidates[:5])
         last_error: Exception | None = None
@@ -272,6 +331,109 @@ class FridaBackend(Backend):
             f"Process '{target}' not found, and none of the {len(candidates)} name "
             f"match(es) could be attached ({alternatives}). Last error: {last_error}"
         )
+
+    def _find_applications(self, device: Any, target: str) -> list:
+        """Installed apps whose label or identifier matches *target*.
+
+        Exact matches (on either field) win; otherwise loose matches are
+        returned. Best-effort: devices without app enumeration (desktop) or any
+        enumeration failure yield an empty list.
+        """
+        try:
+            apps = list(device.enumerate_applications())
+        except Exception as e:
+            logger.debug("Could not enumerate applications: %s", e)
+            return []
+
+        target = str(target)
+        exact = [a for a in apps if is_exact_name(a.name, target) or is_exact_name(a.identifier, target)]
+        if exact:
+            return exact
+        return [a for a in apps if name_matches(a.name, target) or name_matches(a.identifier, target)]
+
+    def _attach_by_application(self, device: Any, target: str, on_detached: Callable | None = None) -> Any:
+        """Attach to a running app matching *target*, or explain why we cannot."""
+        apps = self._find_applications(device, target)
+        running = [a for a in apps if a.pid]
+        if running:
+            return self._attach_to_app(device, target, running[0], on_detached)
+        if apps:
+            raise ProcessNotFoundError(self._not_running_message(target, apps))
+        raise ProcessNotFoundError(self._no_match_message(device, target))
+
+    def _attach_to_app(self, device: Any, target: str, app: Any, on_detached: Callable | None = None) -> Any:
+        """Attach to the main process of a running *app*."""
+        frida = _import_frida()
+        try:
+            session = device.attach(app.pid)
+        except Exception as e:
+            if _is_attach_timeout(frida, e):
+                raise _attach_timeout_error(device, target, app.pid, e) from e
+            raise AttachmentError(f"Failed to attach to app '{app.name}' ({app.identifier}, PID {app.pid}): {e}") from e
+        logger.warning(
+            "No process is named exactly '%s'; attached to app '%s' (%s, PID %d). Results describe THAT process.",
+            target,
+            app.name,
+            app.identifier,
+            app.pid,
+        )
+        self.set_detached_callback(session, on_detached)
+        return session
+
+    @staticmethod
+    def _not_running_message(target: str, apps: list) -> str:
+        """Error text for an app that is installed but has no running process."""
+        if len(apps) == 1:
+            identifier = apps[0].identifier
+            return (
+                f"'{target}' is installed ({identifier}) but not running. Start the app first, "
+                f"or re-run with -s to spawn it, e.g.: tlsLibHunter -m -s {identifier}"
+            )
+        listed = "\n  ".join(f"{a.name} ({a.identifier})" for a in apps)
+        return (
+            f"'{target}' matches several installed apps, none of them running:\n  {listed}\n"
+            f"Start the app first, or re-run with -s <identifier> to spawn it, "
+            f"e.g.: tlsLibHunter -m -s {apps[0].identifier}"
+        )
+
+    def _no_match_message(self, device: Any, target: str) -> str:
+        """Error text when neither a process nor an installed app matches."""
+        message = f"Process '{target}' is not running and no installed app matches it."
+        running = self._running_apps(device)
+        if running:
+            listed = "\n  ".join(f"{a.name} ({a.identifier}, PID {a.pid})" for a in running[:10])
+            message += f"\nRunning apps:\n  {listed}"
+        return message + "\nList apps with: frida-ps -Uai (mobile) or frida-ps (local)"
+
+    @staticmethod
+    def _running_apps(device: Any) -> list:
+        """Apps with a live process, or [] when the device cannot enumerate apps."""
+        try:
+            return [a for a in device.enumerate_applications() if a.pid]
+        except Exception as e:
+            logger.debug("Could not enumerate applications: %s", e)
+            return []
+
+    def _resolve_spawn_target(self, device: Any, target: str) -> str:
+        """Map an app label to its identifier so mobile spawn() can find it.
+
+        Identifiers and anything not matching an installed app (desktop paths
+        and binaries) are returned unchanged.
+        """
+        apps = self._find_applications(device, target)
+        if any(a.identifier == target for a in apps):
+            return target
+        labelled = [a for a in apps if is_exact_name(a.name, target)]
+        if len(labelled) > 1:
+            listed = ", ".join(f"{a.name} ({a.identifier})" for a in labelled)
+            raise ProcessNotFoundError(
+                f"'{target}' is ambiguous: {len(labelled)} installed apps share that label "
+                f"({listed}). Re-run with the app identifier."
+            )
+        if labelled:
+            logger.info("Resolved '%s' to app identifier '%s'", target, labelled[0].identifier)
+            return labelled[0].identifier
+        return target
 
     def describe_session(self, device: Any, session: Any) -> dict[str, Any] | None:
         """Identify the process a session is really attached to.
@@ -323,6 +485,9 @@ class FridaBackend(Backend):
         timeout: int = 10,
         on_detached: Callable | None = None,
     ) -> Any:
+        # Resolved before the try: an ambiguous label is reported as-is rather
+        # than wrapped in "Failed to spawn".
+        target = self._resolve_spawn_target(device, str(target))
         pid = None
         session = None
         try:

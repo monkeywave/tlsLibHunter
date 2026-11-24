@@ -1,8 +1,10 @@
 """Tests for CLI argument parsing."""
 
+import logging
 import sys
 
-from tlslibhunter.cli import _setup_debug_log_file, build_parser
+from tlslibhunter.backends.base import ProcessNotFoundError
+from tlslibhunter.cli import _setup_debug_log_file, build_parser, main
 
 
 class TestDebugLogFile:
@@ -39,6 +41,56 @@ class TestDebugLogFile:
         contents = (tmp_path / log_path).read_text(encoding="utf-8")
         assert "on stdout" in contents
         assert "on stderr" in contents
+
+
+class _HunterRaisingOnScan:
+    """Minimal hunter stand-in whose scan() fails with a chained BackendError."""
+
+    def __init__(self, error):
+        self._error = error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def scan(self):
+        try:
+            raise RuntimeError("underlying frida failure")
+        except RuntimeError as cause:
+            raise self._error from cause
+
+
+class TestBackendErrorReporting:
+    """Expected backend errors print one clean line, not a traceback."""
+
+    def test_process_not_found_with_debug_keeps_traceback_off_terminal(self, tmp_path, monkeypatch, capsys, caplog):
+        from tlslibhunter.hunter import TLSLibHunter
+
+        monkeypatch.chdir(tmp_path)
+        error = ProcessNotFoundError("Process 'Gemini' not found")
+        monkeypatch.setattr(TLSLibHunter, "from_config", classmethod(lambda cls, config: _HunterRaisingOnScan(error)))
+        real_stdout, real_stderr = sys.stdout, sys.stderr
+        try:
+            with caplog.at_level(logging.DEBUG, logger="tlslibhunter"):
+                exit_code = main(["Gemini", "-d"])
+            sys.stderr.flush()
+        finally:
+            sys.stdout, sys.stderr = real_stdout, real_stderr
+
+        assert exit_code == 1
+        assert "Process 'Gemini' not found" in caplog.text
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err
+        assert "Traceback" not in captured.out
+        assert "Traceback" not in caplog.text
+        # The traceback is still preserved in the -d log file for diagnosis.
+        log_files = list(tmp_path.glob("tlslibhunter_Gemini_*.log"))
+        assert len(log_files) == 1
+        log_contents = log_files[0].read_text(encoding="utf-8")
+        assert "Traceback" in log_contents
+        assert "ProcessNotFoundError" in log_contents
 
 
 class TestCLIParsing:
@@ -94,3 +146,41 @@ class TestCLIParsing:
         args = self.parser.parse_args(["foo"])
         assert args.scan_all_modules is False
         assert args.scan_everything is False
+
+    def test_unfreeze_flag_parses(self):
+        args = self.parser.parse_args(["Gemini", "-m", "--unfreeze"])
+        assert args.unfreeze is True
+
+    def test_unfreeze_defaults_false(self):
+        args = self.parser.parse_args(["Gemini"])
+        assert args.unfreeze is False
+
+
+class TestUnfreezeConfigWiring:
+    """--unfreeze must reach HunterConfig.unfreeze (it is opt-in: needs root, mutates device)."""
+
+    def _captured_config(self, monkeypatch, argv):
+        from tlslibhunter.hunter import TLSLibHunter
+
+        captured = {}
+
+        def fake_from_config(cls, config):
+            captured["config"] = config
+            raise RuntimeError("stop after config capture")
+
+        monkeypatch.setattr(TLSLibHunter, "from_config", classmethod(fake_from_config))
+        assert main(argv) == 1  # initialization "failure" short-circuits main()
+        return captured["config"]
+
+    def test_unfreeze_flag_sets_config(self, monkeypatch):
+        config = self._captured_config(monkeypatch, ["Gemini", "-m", "--unfreeze"])
+        assert config.unfreeze is True
+
+    def test_unfreeze_absent_leaves_config_false(self, monkeypatch):
+        config = self._captured_config(monkeypatch, ["Gemini", "-m"])
+        assert config.unfreeze is False
+
+    def test_hunter_config_unfreeze_defaults_false(self):
+        from tlslibhunter.config import HunterConfig
+
+        assert HunterConfig(target="Gemini").unfreeze is False

@@ -30,6 +30,7 @@ class HunterConfig:
         scan_encoded_strings: Search for XOR/base64-encoded TLS strings.
         scan_all_modules: Bypass TLS heuristic filter; scan every module except the hard skip-list.
         scan_everything: Scan every loaded module including libc/libm/ART; bypasses size filter.
+        unfreeze: Android (root): unfreeze a target frozen by the cached-apps freezer and retry the attach once.
     """
 
     target: str = ""
@@ -51,6 +52,7 @@ class HunterConfig:
     scan_encoded_strings: bool = False
     scan_all_modules: bool = False
     scan_everything: bool = False
+    unfreeze: bool = False
 
     def __post_init__(self):
         # Deprecation shim: if someone passes a string to mobile, migrate to serial

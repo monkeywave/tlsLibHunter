@@ -5,6 +5,15 @@ All notable changes to tlsLibHunter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file starts at 0.2.9; earlier versions are documented only in git history.
 
+## [0.3.1]
+
+### Fixed
+  - **Packaging warnings on install** — removed the deprecated
+    `License :: OSI Approved :: MIT License` classifier (the SPDX `license="MIT"`
+    field already declares it) and listed `tlslibhunter.scripts` explicitly as a
+    package so the bundled Frida agents (`*.js`) are no longer flagged as
+    "Package would be ignored".
+
 ## [0.3.0]
 
 ### Added

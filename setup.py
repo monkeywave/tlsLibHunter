@@ -35,7 +35,9 @@ setup(
     author=about.__author__,
     author_email="daniel.baier@fkie.fraunhofer.de",
     license="MIT",
-    packages=find_packages(exclude=("tests",)),
+    # "tlslibhunter.scripts" holds only the Frida agents (*.js), so it has no
+    # __init__.py and find_packages() skips it; list it explicitly.
+    packages=find_packages(exclude=("tests",)) + ["tlslibhunter.scripts"],
     python_requires=">=3.8",
     install_requires=install_requires,
     extras_require={
@@ -43,13 +45,10 @@ setup(
     },
     # Include non-Python assets inside the package
     package_data={
-        "tlslibhunter": [
-            "scripts/*.js",
-        ],
+        "tlslibhunter.scripts": ["*.js"],
     },
     include_package_data=True,
     classifiers=[
-        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Natural Language :: English",
         "Programming Language :: Python :: 3 :: Only",

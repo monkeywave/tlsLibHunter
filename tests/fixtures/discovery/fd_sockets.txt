@@ -1,0 +1,26 @@
+PID 568 com.google.android.googlequicksearchbox:search
+lrwx------ 1 root root 64 2026-11-25 12:52 115 -> socket:[8216998]
+lrwx------ 1 root root 64 2026-11-25 12:52 141 -> socket:[8217800]
+lrwx------ 1 root root 64 2026-11-25 12:52 142 -> socket:[8217801]
+lrwx------ 1 root root 64 2026-11-25 12:52 165 -> socket:[8208111]
+lrwx------ 1 root root 64 2026-11-25 12:52 238 -> socket:[8257067]
+lrwx------ 1 root root 64 2026-11-25 12:52 252 -> socket:[8608746]
+lrwx------ 1 root root 64 2026-11-25 11:49 264 -> socket:[8630677]
+lrwx------ 1 root root 64 2026-11-25 12:52 296 -> socket:[8638988]
+lrwx------ 1 root root 64 2026-11-25 12:52 3 -> socket:[8211268]
+lrwx------ 1 root root 64 2026-11-25 12:52 65 -> socket:[8208072]
+lrwx------ 1 root root 64 2026-11-25 12:52 79 -> socket:[8216982]
+lrwx------ 1 root root 64 2026-11-25 12:52 80 -> socket:[8216983]
+PID 5334 com.google.android.googlequicksearchbox:googleapp
+lrwx------ 1 root root 64 2026-11-25 12:52 109 -> socket:[8617528]
+lrwx------ 1 root root 64 2026-11-25 12:52 111 -> socket:[8618158]
+lrwx------ 1 root root 64 2026-11-25 12:52 3 -> socket:[8604109]
+lrwx------ 1 root root 64 2026-11-25 12:52 65 -> socket:[8604118]
+PID 11192 com.google.android.apps.bard
+lrwx------ 1 root root 64 2026-11-25 12:52 3 -> socket:[8628972]
+lrwx------ 1 root root 64 2026-11-25 12:51 65 -> socket:[8639829]
+lrwx------ 1 root root 64 2026-11-25 12:52 84 -> socket:[8638950]
+lrwx------ 1 root root 64 2026-11-25 12:52 85 -> socket:[8638951]
+PID 29615 com.google.android.googlequicksearchbox:interactor
+lrwx------ 1 root root 64 2026-11-25 12:52 3 -> socket:[8363873]
+lrwx------ 1 root root 64 2026-11-25 12:52 65 -> socket:[8357443]

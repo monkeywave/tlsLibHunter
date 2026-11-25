@@ -1,0 +1,13 @@
+{
+  "description": "Packages (and the pseudo-package netd) whose processes carry network traffic for many apps; traffic seen there cannot be attributed to a single target.",
+  "packages": [
+    "com.android.chrome",
+    "com.android.providers.downloads",
+    "com.android.providers.media.module",
+    "com.android.vending",
+    "com.google.android.as.oss",
+    "com.google.android.gms",
+    "com.google.android.gsf",
+    "netd"
+  ]
+}

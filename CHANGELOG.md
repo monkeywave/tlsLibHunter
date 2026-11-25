@@ -5,6 +5,46 @@ All notable changes to tlsLibHunter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file starts at 0.2.9; earlier versions are documented only in git history.
 
+## [0.4.0]
+
+### Added
+  - **`tlsLibHunter discover <app>`** (Android) — finds the processes that
+    carry an app's TLS traffic without attaching Frida: samples the device
+    (`ps`, `pm list packages -U`, `/proc/net/{tcp,tcp6,udp,udp6}`, `dumpsys`)
+    for `--duration` seconds every `--interval` seconds and prints each
+    candidate with its role and evidence, or with `--json` / `--write-profile`
+    a capture profile (schema `tlslibhunter.profile/1`: gate packages, process
+    patterns, device fingerprint, versionCode, candidates).
+    - **Topology**: roles `target`, `sibling` (same app UID), `delegate`,
+      `sdk_sandbox` and `shared_system` (GMS, Play Store, ...).
+    - **Socket ownership**: with root, sockets are attributed per PID through
+      the socket inode → PID map from `/proc/<pid>/fd` (`net:tcp:443`,
+      `net:udp-connected:443`, ...); without root only per UID
+      (`net:uid-attributed`, port 443).
+    - **Hand-off**: the package hosting the foreground UI (`foreground_host`)
+      and services bound by the target in `dumpsys activity oom`
+      (`oom_bound_by:<process>`) make delegates. Shared system delegates are
+      never promoted to attributable candidates or gate packages; they are kept
+      only with a TLS socket of their own.
+  - **TLS-library confirmation** (root) — each attributable candidate's
+    `/proc/<pid>/maps` adds `tls_lib:` evidence and may mark it `confirmed`.
+    The zygote-preloaded Conscrypt `libssl.so` and tethering
+    `libhttpengine.so` are mapped into every app process and count only as weak
+    evidence (confirmed together with a TLS socket of that process).
+  - **`discover --probe`** — a small Frida agent attached to the running app
+    (launched if needed, thawed if frozen) records the binder interfaces it
+    calls and its `connect()`s; packages behind known interfaces
+    (`binder_descriptors.json`) become delegates with `handoff:binder:<descriptor>`
+    evidence, unmapped interfaces are listed in the profile's
+    `binder_descriptors` (escaped, capped).
+  - **`discover --watch`** — follows process churn (restarts, new delegates)
+    without Frida: one JSON line per event on stdout (schema
+    `tlslibhunter.watch/1`: `event`, `pid`, `process`, `package`, `role`,
+    `evidence`, `ts`) for `process_added`, `process_restarted`, `process_gone`
+    and `evidence_added`, until Ctrl+C (exit 0) or `--duration` when given.
+  - **Package-name validation** — package names are validated before they
+    reach an `adb shell` command line.
+
 ## [0.3.2]
 
 ### Added

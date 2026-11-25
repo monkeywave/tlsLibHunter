@@ -1,0 +1,34 @@
+{
+  "description": "Binder interface descriptors seen by `discover --probe`. 'packages': descriptor prefix -> package serving it (null: a known hand-off whose serving package varies, e.g. the user's browser; kept as evidence only). 'ignore': prefixes of generic system interfaces every app talks to (system_server, framework providers), which say nothing about delegates. The longest matching prefix wins; 'packages' is checked before 'ignore'.",
+  "packages": {
+    "com.google.android.gms.": "com.google.android.gms",
+    "com.google.android.gsf.": "com.google.android.gsf",
+    "com.google.android.search.": "com.google.android.googlequicksearchbox",
+    "com.google.android.apps.gsa.": "com.google.android.googlequicksearchbox",
+    "com.google.android.googlequicksearchbox.": "com.google.android.googlequicksearchbox",
+    "com.android.vending.": "com.android.vending",
+    "com.google.android.finsky.": "com.android.vending",
+    "android.support.customtabs.ICustomTabsService": null,
+    "androidx.browser.customtabs.": null,
+    "org.chromium.": null
+  },
+  "ignore": [
+    "android.accounts.",
+    "android.app.",
+    "android.content.",
+    "android.database.",
+    "android.hardware.",
+    "android.location.",
+    "android.media.",
+    "android.net.",
+    "android.os.",
+    "android.permission.",
+    "android.security.",
+    "android.service.",
+    "android.system.",
+    "android.telephony.",
+    "android.view.",
+    "android.window.",
+    "com.android.internal."
+  ]
+}

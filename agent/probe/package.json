@@ -1,0 +1,14 @@
+{
+  "name": "tlslibhunter-probe-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Source of tlslibhunter/discovery/probe_agent.js (discover --probe); Frida 17 needs the Java bridge bundled.",
+  "type": "module",
+  "scripts": {
+    "build": "frida-compile probe_agent.js -o ../../tlslibhunter/discovery/probe_agent.js"
+  },
+  "devDependencies": {
+    "frida-compile": "19.0.5",
+    "frida-java-bridge": "7.1.0"
+  }
+}

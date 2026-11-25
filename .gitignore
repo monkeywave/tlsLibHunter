@@ -55,3 +55,6 @@ research/
 research_State.txt
 *.log
 tls_libs*
+
+# probe agent build (agent/probe)
+node_modules/

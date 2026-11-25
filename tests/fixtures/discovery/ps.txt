@@ -1,0 +1,12 @@
+  PID   UID NAME
+568 10156 com.google.android.googlequicksearchbox:search
+5334 10156 com.google.android.googlequicksearchbox:googleapp
+6371 10162 com.google.android.gms.ui
+11192 10298 com.google.android.apps.bard
+19016 10162 com.google.android.gms
+27611 0 zygote
+27612 0 zygote64
+28051 1053 webview_zygote
+29615 10156 com.google.android.googlequicksearchbox:interactor
+32457 10162 com.google.android.gms.unstable
+2267 10274 com.cloudflare.onedotonedotonedotone

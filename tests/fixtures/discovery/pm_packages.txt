@@ -1,0 +1,25 @@
+$ pm list users
+Users:
+	UserInfo{0:Eigentümer:4c13} running
+$ pm list packages -U --user 0 | grep
+package:com.google.android.gms.location.history uid:10184
+package:com.google.android.apps.bard uid:10298
+package:com.google.android.googlequicksearchbox uid:10156
+package:com.google.android.gms.supervision uid:10119
+package:com.google.android.gms uid:10162
+package:com.google.android.googlequicksearchbox.nga_resources uid:10173
+$ pm list packages -U | grep
+package:com.google.android.gms.location.history uid:10184
+package:com.google.android.apps.bard uid:10298
+package:com.google.android.googlequicksearchbox uid:10156
+package:com.google.android.gms.supervision uid:10119
+package:com.google.android.gms uid:10162
+package:com.google.android.googlequicksearchbox.nga_resources uid:10173
+$ dumpsys package bard | grep -E "userId|sharedUser|versionName|codePath"
+    codePath=/data/app/~~lVadDnU5OKsRoXQkBMoU6w==/com.google.android.apps.bard-UlkXV9kKrtBA-M1LlizsYw==
+    versionName=1.0.1009090390
+$ dumpsys package gsa
+    codePath=/data/app/~~dKQtv1O-97-qNuNh2QjOlQ==/com.google.android.googlequicksearchbox-fyGUrcntpxzc5klDPVlvPA==
+    versionName=17.76.14.sa.arm64
+    codePath=/product/priv-app/Velvet
+    versionName=14.17.22.29.arm64

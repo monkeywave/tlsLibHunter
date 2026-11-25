@@ -1,0 +1,5 @@
+    topResumedActivity=ActivityRecord{ca91732 u0 com.google.android.googlequicksearchbox/com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity t2241}
+      state=RESUMED delayedResume=false finishing=false
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{ca91732 u0 com.google.android.googlequicksearchbox/com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity t2241}
+  ResumedActivity: ActivityRecord{ca91732 u0 com.google.android.googlequicksearchbox/com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity t2241}

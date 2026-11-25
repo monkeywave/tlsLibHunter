@@ -1,0 +1,248 @@
+  OOM levels:
+    -900: SYSTEM_ADJ (   73,728K)
+    -800: PERSISTENT_PROC_ADJ (   73,728K)
+    -700: PERSISTENT_SERVICE_ADJ (   73,728K)
+      0: FOREGROUND_APP_ADJ (   73,728K)
+     100: VISIBLE_APP_ADJ (   92,160K)
+     200: PERCEPTIBLE_APP_ADJ (  110,592K)
+     225: PERCEPTIBLE_MEDIUM_APP_ADJ (  129,024K)
+     250: PERCEPTIBLE_LOW_APP_ADJ (  129,024K)
+     300: BACKUP_APP_ADJ (  221,184K)
+     400: HEAVY_WEIGHT_APP_ADJ (  221,184K)
+     500: SERVICE_ADJ (  221,184K)
+     600: HOME_APP_ADJ (  221,184K)
+     700: PREVIOUS_APP_ADJ (  221,184K)
+     800: SERVICE_B_ADJ (  221,184K)
+     900: CACHED_APP_MIN_ADJ (  221,184K)
+     999: CACHED_APP_MAX_ADJ (  322,560K)
+
+  Process OOM control (53 total, non-act at 7, non-svc at 7):
+    PERS #52: sys    F/ /PER  LCMNFU  t: 0 27734:system/1000 (fixed)
+        oom: max=-900 curRaw=-900 setRaw=-900 cur=-900 set=-900
+        state: cur=PER  set=PER  lastPss=337MB lastSwapPss=17MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #51: pers   F/ /PER  LCMNFU  t: 0 27979:com.android.systemui/u0a227 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=235MB lastSwapPss=30MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #50: pers   F/ /PER  LCMNFU  t: 0 28096:com.android.networkstack.process/1073 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=28MB lastSwapPss=7,2MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #49: pers   F/ /PER  LCMNFU  t: 0 28169:com.android.hbmsvmanager/u0a204 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=10MB lastSwapPss=7,8MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #48: pers   F/ /PER  LCMNFU  t: 0 28179:.dataservices/1001 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=7,4MB lastSwapPss=6,1MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #47: pers   F/ /PER  LCMNFU  t: 0 28185:.qtidataservices/u0a104 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=32MB lastSwapPss=4,8MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #46: pers   F/ /PER  LCMNFU  t: 0 28202:com.google.android.grilservice/u0a214 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=10MB lastSwapPss=7,5MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #45: pers   F/ /PER  LCMNFU  t: 0 8929:com.qti.phone/u0a170 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=5,8MB lastSwapPss=423KB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #44: pers   F/ /PER  LCMNFU  t: 0 28218:com.qualcomm.qcrilmsgtunnel/1001 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=7,6MB lastSwapPss=5,7MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #43: pers   F/ /PER  LCMNFU  t: 0 28233:com.android.se/1068 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=18MB lastSwapPss=16MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #42: pers   F/ /PER  LCMNFU  t: 0 28206:org.codeaurora.ims/u0a224 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=12MB lastSwapPss=9,2MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #41: pers   F/ /PER  LCMNFU  t: 0 28242:com.qualcomm.qti.devicestatisticsservice/u0a232 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=15MB lastSwapPss=11MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #40: pers   F/ /PER  LCMNFU  t: 0 28267:com.google.android.apps.cbrsnetworkmonitor/u0a148 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=7,0MB lastSwapPss=5,7MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #39: pers   F/ /PER  LCMNFU  t: 0 28269:com.android.phone/1001 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=45MB lastSwapPss=20MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #38: pers   F/ /PER  LCMNFU  t: 0 29201:com.android.nfc/1027 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=33MB lastSwapPss=26MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #37: pers   F/ /PER  LCMNFU  t: 0 29254:com.google.SSRestartDetector/1000 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=7,2MB lastSwapPss=5,9MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #36: pers   F/ /PER  LCMNFU  t: 0 29244:com.android.ims.rcsservice/1001 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=8,4MB lastSwapPss=5,6MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #35: pers   F/ /PER  LCMNFU  t: 0 29286:com.google.android.connectivitythermalpowermanager/u0a211 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=12MB lastSwapPss=9,2MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    PERS #34: pers   F/ /PER  LCMNFU  t: 0 9261:com.qualcomm.qti.services.secureui:sui_service/u0a233 (fixed)
+        oom: max=-800 curRaw=-800 setRaw=-800 cur=-800 set=-800
+        state: cur=PER  set=PER  lastPss=5,2MB lastSwapPss=431KB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    Proc #30: psvc   F/ /PER  LCMNFU  t: 0 29102:com.google.android.providers.media.module/u0a242 (service)
+        com.google.android.providers.media.module/com.android.providers.media.fuse.ExternalStorageServiceImpl<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=-700 setRaw=-700 cur=-700 set=-700
+        state: cur=PER  set=PER  lastPss=39MB lastSwapPss=4,9MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #17: psvc   F/ /PER  LCMNFU  t: 0 28157:com.google.android.bluetooth/1002 (service)
+        com.google.android.bluetooth/com.android.bluetooth.gatt.GattService<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=-700 setRaw=-700 cur=-700 set=-700
+        state: cur=PER  set=PER  lastPss=22MB lastSwapPss=4,4MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 0: fg     T/A/TOP  LCMNFU  t: 0 568:com.google.android.googlequicksearchbox:search/u0a156 (top-activity)
+        oom: max=1001 curRaw=0 setRaw=0 cur=0 set=0
+        state: cur=TOP  set=TOP  lastPss=292MB lastSwapPss=15MB lastCachedPss=0,00
+        cached=false empty=false hasAboveClient=false
+    Proc #13: vis    F/ /BTOP ---NFU  t: 0 8786:com.google.android.adservices.api/u0a256 (service)
+        com.google.android.adservices.api/com.android.adservices.common.AdServicesCommonService<=Proc{19016:com.google.android.gms/u0a162}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BTOP set=BTOP lastPss=12MB lastSwapPss=445KB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 3: vis    F/ /BTOP LCMNFU  t: 0 29615:com.google.android.googlequicksearchbox:interactor/u0a156 (service)
+        com.google.android.googlequicksearchbox/com.google.frameworks.client.data.android.server.tiktok.assistant.InteractorProcessEndpointService<=Proc{568:com.google.android.googlequicksearchbox:search/u0a156}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BTOP set=BTOP lastPss=80MB lastSwapPss=10MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 2: vis    F/ /BTOP LCMNFU  t: 0 19016:com.google.android.gms/u0a162 (service)
+        com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService<=Proc{568:com.google.android.googlequicksearchbox:search/u0a156}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BTOP set=BTOP lastPss=208MB lastSwapPss=8,5MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 1: vis    F/ /BTOP LCMNFU  t: 0 32457:com.google.android.gms.unstable/u0a162 (service)
+        com.google.android.gms/.droidguard.DroidGuardService<=Proc{568:com.google.android.googlequicksearchbox:search/u0a156}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BTOP set=BTOP lastPss=55MB lastSwapPss=16MB lastCachedPss=53MB
+        cached=false empty=true hasAboveClient=false
+    Proc #15: vis    F/S/FGS  ---NFU  t: 0 2267:com.cloudflare.onedotonedotonedotone/u0a274 (service)
+        com.cloudflare.onedotonedotonedotone/com.cloudflare.app.vpnservice.CloudflareVpnService<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=FGS  set=FGS  lastPss=134MB lastSwapPss=18MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #33: vis    F/ /BFGS LCMNFU  t: 0 28309:com.google.android.ext.services/u0a238 (service)
+        com.google.android.ext.services/android.ext.services.autofill.InlineSuggestionRenderServiceImpl<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BFGS set=BFGS lastPss=29MB lastSwapPss=25MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #26: vis    F/ /BFGS LCMNFU  t: 0 9315:com.breel.wallpapers20/u0a196 (service)
+        com.breel.wallpapers20/.stack.wallpaper.StackWallpaper<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BFGS set=BFGS lastPss=98MB lastSwapPss=397KB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #25: vis    F/ /BFGS LCMNFU  t: 0 29097:com.google.android.as/u0a158 (service)
+        com.google.android.as/com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationAssistantService<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BFGS set=BFGS lastPss=109MB lastSwapPss=20MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 5: vis    F/ /BFGS ---NFU  t: 0 18860:com.google.android.apps.nexuslauncher/u0a208 (service)
+        com.google.android.apps.nexuslauncher/com.android.quickstep.TouchInteractionService<=Proc{27979:com.android.systemui/u0a227}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BFGS set=BFGS lastPss=73MB lastSwapPss=32MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 4: vis    T/ /BFGS LCMNFU  t: 0 16259:com.google.android.inputmethod.latin/u0a180 (service)
+        com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=100 setRaw=100 cur=100 set=100
+        state: cur=BFGS set=BFGS lastPss=145MB lastSwapPss=31MB lastCachedPss=53MB
+        cached=false empty=true hasAboveClient=false
+    Proc #31: prcp   F/ /BFGS ---NFU  t: 0 31966:com.google.android.apps.messaging:rcs/u0a124 (service)
+        com.google.android.apps.messaging/com.google.android.ims.binding.SystemBindingService<=Proc{27734:system/1000}
+        oom: max=1001 curRaw=200 setRaw=200 cur=200 set=200
+        state: cur=BFGS set=BFGS lastPss=39MB lastSwapPss=30MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #16: svc    b/ /SVC  ------  t: 0 28980:com.google.android.apps.scone/u0a160 (started-services)
+        oom: max=1001 curRaw=500 setRaw=500 cur=500 set=500
+        state: cur=SVC  set=SVC  lastPss=32MB lastSwapPss=4,7MB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #18: prev   b/ /LAST ------  t: 0 11044:com.android.providers.calendar/u0a71 (recent-provider)
+        oom: max=1001 curRaw=700 setRaw=700 cur=700 set=700
+        state: cur=LAST set=LAST lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc #32: svcb   b/ /SVC  ------  t: 0 893:com.google.android.GoogleCamera/u0a194 (started-services)
+        oom: max=1001 curRaw=800 setRaw=800 cur=800 set=800
+        state: cur=SVC  set=SVC  lastPss=139MB lastSwapPss=356KB lastCachedPss=0,00
+        cached=false empty=true hasAboveClient=false
+    Proc # 6: cch    b/ /CAC  ------  t: 0 6371:com.google.android.gms.ui/u0a162 (cch-as-act)
+        oom: max=1001 curRaw=900 setRaw=900 cur=900 set=900
+        state: cur=CAC  set=CAC  lastPss=55MB lastSwapPss=46MB lastCachedPss=55MB
+        cached=true empty=true hasAboveClient=false
+        run cpu over +1m46s941ms used 0 (0%)
+    Proc #19: cch+ 5 b/ /CEM  ------  t: 0 10694:com.topjohnwu.magisk/u0a258 (cch-empty)
+        oom: max=1001 curRaw=905 setRaw=905 cur=905 set=905
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc # 8: cch+ 5 b/ /CEM  ------  t: 0 11209:com.google.android.partnersetup/u0a116 (cch-empty)
+        oom: max=1001 curRaw=905 setRaw=905 cur=905 set=905
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc # 7: cch+ 5 b/ /CEM  ------  t: 0 8853:com.google.android.projection.gearhead:car/u0a114 (cch-empty)
+        oom: max=1001 curRaw=905 setRaw=905 cur=905 set=905
+        state: cur=CEM  set=CEM  lastPss=29MB lastSwapPss=12MB lastCachedPss=29MB
+        cached=true empty=true hasAboveClient=false
+    Proc #14: cch+15 b/ /CEM  ------  t: 0 11192:com.google.android.apps.bard/u0a298 (cch-empty)
+        oom: max=1001 curRaw=915 setRaw=915 cur=915 set=915
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc #12: cch+15 b/ /CEM  ------  t: 0 11258:com.google.android.apps.turbo:aab/u0a113 (cch-empty)
+        oom: max=1001 curRaw=915 setRaw=915 cur=915 set=915
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc #10: cch+15 b/ /CEM  ------  t: 0 5902:com.google.process.gapps/u0a162 (cch-empty)
+        oom: max=1001 curRaw=915 setRaw=915 cur=915 set=915
+        state: cur=CEM  set=CEM  lastPss=8,7MB lastSwapPss=1,6MB lastCachedPss=8,7MB
+        cached=true empty=true hasAboveClient=false
+    Proc # 9: cch+15 b/ /CEM  ------  t: 0 11294:com.android.chrome/u0a187 (cch-empty)
+        oom: max=1001 curRaw=915 setRaw=915 cur=915 set=915
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc #22: cch+25 b/ /CEM  ------  t: 0 5546:com.google.android.apps.messaging/u0a124 (cch-empty)
+        oom: max=1001 curRaw=925 setRaw=925 cur=925 set=925
+        state: cur=CEM  set=CEM  lastPss=169MB lastSwapPss=71MB lastCachedPss=169MB
+        cached=true empty=true hasAboveClient=false
+    Proc #21: cch+25 b/ /CEM  ------  t: 0 3322:com.google.android.apps.turbo/u0a113 (cch-empty)
+        oom: max=1001 curRaw=925 setRaw=925 cur=925 set=925
+        state: cur=CEM  set=CEM  lastPss=9,1MB lastSwapPss=2,7MB lastCachedPss=9,1MB
+        cached=true empty=true hasAboveClient=false
+    Proc #11: cch+25 b/ /CEM  ------  t: 0 11056:com.google.process.gservices/u0a162 (cch-empty)
+        oom: max=1001 curRaw=925 setRaw=925 cur=925 set=925
+        state: cur=CEM  set=CEM  lastPss=0,00 lastSwapPss=0,00 lastCachedPss=0,00
+        cached=true empty=true hasAboveClient=false
+    Proc #28: cch+35 b/ /CEM  ------  t: 0 5334:com.google.android.googlequicksearchbox:googleapp/u0a156 (cch-empty)
+        oom: max=1001 curRaw=935 setRaw=935 cur=935 set=935
+        state: cur=CEM  set=CEM  lastPss=127MB lastSwapPss=50MB lastCachedPss=127MB
+        cached=true empty=true hasAboveClient=false
+    Proc #23: cch+35 b/ /CEM  ------  t: 0 9656:com.google.android.apps.work.clouddpc/u0a171 (cch-empty)
+        oom: max=1001 curRaw=935 setRaw=935 cur=935 set=935
+        state: cur=CEM  set=CEM  lastPss=38MB lastSwapPss=12MB lastCachedPss=38MB
+        cached=true empty=true hasAboveClient=false
+    Proc #29: cch+45 b/ /CEM  ------  t: 0 8573:com.google.android.apps.photos/u0a202 (cch-empty)
+        oom: max=1001 curRaw=945 setRaw=945 cur=945 set=945
+        state: cur=CEM  set=CEM  lastPss=72MB lastSwapPss=20MB lastCachedPss=72MB
+        cached=true empty=true hasAboveClient=false
+    Proc #20: cch+45 b/ /CEM  ------  t: 0 9131:com.google.android.cellbroadcastreceiver/u0a250 (cch-empty)
+        oom: max=1001 curRaw=945 setRaw=945 cur=945 set=945
+        state: cur=CEM  set=CEM  lastPss=23MB lastSwapPss=2,9MB lastCachedPss=23MB
+        cached=true empty=true hasAboveClient=false
+    Proc #27: cch+65 b/ /CEM  ------  t: 0 8014:android.process.acore/u0a68 (cch-empty)
+        oom: max=1001 curRaw=965 setRaw=965 cur=965 set=965
+        state: cur=CEM  set=CEM  lastPss=12MB lastSwapPss=6,7MB lastCachedPss=12MB
+        cached=true empty=true hasAboveClient=false
+    Proc #24: cch+65 b/ /CEM  ------  t: 0 6636:com.instagram.barcelona/u0a282 (cch-empty)
+        oom: max=1001 curRaw=965 setRaw=965 cur=965 set=965
+        state: cur=CEM  set=CEM  lastPss=165MB lastSwapPss=77MB lastCachedPss=165MB
+        cached=true empty=true hasAboveClient=false
+
+  mHomeProcess: ProcessRecord{fd4b0bb 18860:com.google.android.apps.nexuslauncher/u0a208}
+  mPreviousProcess: null

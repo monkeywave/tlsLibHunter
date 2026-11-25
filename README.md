@@ -6,7 +6,7 @@
 
 
 # TLSLibHunter
-![version](https://img.shields.io/badge/version-0.3.2-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
+![version](https://img.shields.io/badge/version-0.4.0-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
 
 
@@ -114,6 +114,30 @@ continue. Each process gets its usual results table, followed by a combined summ
 `{"target": ..., "processes": [{"process", "pid", "error", "scan", "extractions"}, ...]}`.
 Extracted libraries go to `./tls_libs_<pid>` per related process, or to `<DIR>/<pid>` with
 `-o DIR`. On other platforms the flag logs a warning and only the target is scanned.
+
+## Process discovery (Android)
+
+`tlsLibHunter discover <app>` finds the processes that carry an app's TLS traffic, without
+attaching Frida. It samples the device (`ps`, `/proc/net`, `dumpsys`) and lists every candidate
+with its role (`target`, `sibling`, `delegate`, `sdk_sandbox`, `shared_system`) and evidence
+(TLS sockets, foreground UI host, oom bindings, mapped TLS libraries with root).
+
+```bash
+# Sample for 20 s (default) while you use the app; print the candidate table
+tlsLibHunter discover com.google.android.apps.bard --serial ABC123
+
+# Save a capture profile (schema tlslibhunter.profile/1)
+tlsLibHunter discover Gemini --duration 30 --json --write-profile gemini.profile.json
+
+# Also learn delegates from the binder interfaces the app calls (Frida probe)
+tlsLibHunter discover Gemini --probe
+
+# Follow restarts and new delegates: one JSON line (tlslibhunter.watch/1) per event, Ctrl+C to stop
+tlsLibHunter discover Gemini --watch --interval 2
+```
+
+Shared system processes (GMS, Play Store, ...) are reported but never promoted to gate packages,
+because their traffic mixes many apps. Without root, sockets are attributed per UID only.
 
 ## Result filtering & scan depth
 

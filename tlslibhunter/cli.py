@@ -90,6 +90,7 @@ examples:
   tlsLibHunter 1234 -l                 Attach to PID 1234
   tlsLibHunter firefox -f json         JSON output
   tlsLibHunter firefox --host 10.0.0.1:27042   Remote Frida device
+  tlsLibHunter discover com.google.android.apps.bard --serial ABC123   Find the processes carrying an app's TLS
 """,
     )
     p.add_argument("target", metavar="TARGET", help="Process name, PID, or package name")
@@ -248,7 +249,17 @@ def _setup_logging(debug: bool = False) -> None:
     logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
 
 
+def _is_discover_command(argv: list[str]) -> bool:
+    return bool(argv) and argv[0] == "discover"
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if _is_discover_command(argv):
+        from tlslibhunter.discover_cli import discover_main
+
+        return discover_main(argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

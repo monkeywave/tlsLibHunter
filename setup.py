@@ -46,6 +46,7 @@ setup(
     # Include non-Python assets inside the package
     package_data={
         "tlslibhunter.scripts": ["*.js"],
+        "tlslibhunter.discovery": ["*.json", "*.js"],
     },
     include_package_data=True,
     classifiers=[

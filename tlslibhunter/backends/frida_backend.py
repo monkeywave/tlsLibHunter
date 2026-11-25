@@ -414,6 +414,10 @@ class FridaBackend(Backend):
             logger.debug("Could not enumerate applications: %s", e)
             return []
 
+    def resolve_app_identifier(self, device: Any, target: str) -> str:
+        """Public alias of the app label -> identifier mapping (e.g. ``Gemini`` -> package)."""
+        return self._resolve_spawn_target(device, target)
+
     def _resolve_spawn_target(self, device: Any, target: str) -> str:
         """Map an app label to its identifier so mobile spawn() can find it.
 

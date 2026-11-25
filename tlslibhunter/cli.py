@@ -86,6 +86,7 @@ examples:
   tlsLibHunter firefox                 List + extract TLS libraries
   tlsLibHunter com.example.app -m -l   List TLS libs on Android device
   tlsLibHunter com.example.app --serial ABC123   Specific device by serial
+  tlsLibHunter Gemini --serial ABC123 --all-processes -l   Target + related processes
   tlsLibHunter 1234 -l                 Attach to PID 1234
   tlsLibHunter firefox -f json         JSON output
   tlsLibHunter firefox --host 10.0.0.1:27042   Remote Frida device
@@ -117,6 +118,12 @@ examples:
         action="store_true",
         help="Android (root): if attaching times out because the app is frozen by the "
         "cached-apps freezer, unfreeze it and retry once",
+    )
+    p.add_argument(
+        "--all-processes",
+        action="store_true",
+        help="Android: after the target, also scan its related processes (other processes of "
+        "the same app and the app hosting its foreground UI, e.g. Gemini -> Google app)",
     )
     p.add_argument("-d", "--debug", action="store_true", help="Debug output")
     p.add_argument("-v", "--verbose", action="store_true", help="Show all scanned modules")
@@ -160,6 +167,79 @@ examples:
         "bypasses the 10 KiB minimum-size filter. Diagnostic / paranoia mode.",
     )
     return p
+
+
+def _scan_and_extract(hunter, config, formatter, emit: bool = True) -> tuple:
+    """Scan one process, print its results, and extract unless list-only.
+
+    ``emit=False`` suppresses the per-process stdout output (used by
+    ``--all-processes -f json``, which prints one combined document instead).
+
+    Returns:
+        (ScanResult, list of ExtractionResult)
+    """
+    # Scan
+    result = hunter.scan()
+
+    if not result.libraries:
+        print("No TLS/SSL libraries detected.", file=sys.stderr)
+        if result.errors:
+            for err in result.errors:
+                print(f"  Error: {err}", file=sys.stderr)
+        return result, []
+
+    # Output scan results
+    if emit:
+        print(formatter.format_scan(result))
+
+    extractions = []
+    # Extract unless list-only (but -o overrides -l)
+    should_extract = not config.list_only or config.output_dir is not None
+    if should_extract:
+        output_dir = config.effective_output_dir
+        print(
+            f"\nExtracting {len(result.libraries)} libraries to {output_dir}...",
+            file=sys.stderr,
+        )
+        extractions = hunter.extract(result, output_dir=output_dir)
+        if extractions:
+            if emit:
+                print(formatter.format_extractions(extractions))
+            success_count = sum(1 for e in extractions if e.success)
+            print(
+                f"\nExtracted {success_count}/{len(extractions)} libraries to {output_dir}",
+                file=sys.stderr,
+            )
+    return result, extractions
+
+
+def _scan_one_process(config, formatter, emit: bool):
+    """Single-process scan path wrapped as a ProcessScanOutcome (for --all-processes)."""
+    from tlslibhunter.hunter import TLSLibHunter
+    from tlslibhunter.multi_process import ProcessScanOutcome, failed_outcome
+
+    print(f"\n=== Scanning '{config.target}' ===", file=sys.stderr)
+    with TLSLibHunter.from_config(config) as hunter:
+        try:
+            result, extractions = _scan_and_extract(hunter, config, formatter, emit=emit)
+        except Exception as e:
+            # Keep the PID the hunter attached to, so related processes can still
+            # be found when the target dies or re-freezes mid-scan.
+            return failed_outcome(config, e, getattr(e, "pid", None) or hunter.attached_pid)
+    return ProcessScanOutcome(target=config.target, result=result, extractions=extractions)
+
+
+def _run_all_processes(config, formatter) -> int:
+    """Scan the target and its related Android processes; print a combined summary.
+
+    Returns 1 only when every scan failed.
+    """
+    from tlslibhunter.multi_process import scan_all_processes
+
+    emit_each = config.format != "json"
+    outcomes = scan_all_processes(config, lambda cfg: _scan_one_process(cfg, formatter, emit_each))
+    print(formatter.format_process_summary(config.target, outcomes))
+    return 0 if any(o.succeeded for o in outcomes) else 1
 
 
 def _setup_logging(debug: bool = False) -> None:
@@ -212,9 +292,17 @@ def main(argv: list[str] | None = None) -> int:
         scan_encoded_strings=args.scan_encoded_strings,
         scan_all_modules=args.scan_all_modules,
         scan_everything=args.scan_everything,
+        all_processes=args.all_processes,
     )
 
     formatter = get_formatter(config.format)
+
+    if config.all_processes:
+        try:
+            return _run_all_processes(config, formatter)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            return 130
 
     try:
         hunter = TLSLibHunter.from_config(config)
@@ -224,35 +312,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         with hunter:
-            # Scan
-            result = hunter.scan()
-
-            if not result.libraries:
-                print("No TLS/SSL libraries detected.", file=sys.stderr)
-                if result.errors:
-                    for err in result.errors:
-                        print(f"  Error: {err}", file=sys.stderr)
-                return 0
-
-            # Output scan results
-            print(formatter.format_scan(result))
-
-            # Extract unless list-only (but -o overrides -l)
-            should_extract = not config.list_only or config.output_dir is not None
-            if should_extract:
-                output_dir = config.effective_output_dir
-                print(
-                    f"\nExtracting {len(result.libraries)} libraries to {output_dir}...",
-                    file=sys.stderr,
-                )
-                extractions = hunter.extract(result, output_dir=output_dir)
-                if extractions:
-                    print(formatter.format_extractions(extractions))
-                    success_count = sum(1 for e in extractions if e.success)
-                    print(
-                        f"\nExtracted {success_count}/{len(extractions)} libraries to {output_dir}",
-                        file=sys.stderr,
-                    )
+            _scan_and_extract(hunter, config, formatter)
 
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)

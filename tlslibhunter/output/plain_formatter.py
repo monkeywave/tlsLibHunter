@@ -8,6 +8,7 @@ from tlslibhunter.output._utils import attached_label
 from tlslibhunter.output._utils import human_size as _human_size
 
 if TYPE_CHECKING:
+    from tlslibhunter.multi_process import ProcessScanOutcome
     from tlslibhunter.scanner.results import ExtractionResult, ScanResult
 
 
@@ -49,4 +50,11 @@ class PlainFormatter:
                 )
             else:
                 lines.append(f"  [FAIL] {ext.library.name}: {ext.error}")
+        return "\n".join(lines)
+
+    def format_process_summary(self, target: str, outcomes: list[ProcessScanOutcome]) -> str:
+        from tlslibhunter.multi_process import summary_rows
+
+        lines = [f"All processes related to '{target}':"]
+        lines += [f"  {name} (PID {pid}): {status}" for name, pid, status in summary_rows(outcomes)]
         return "\n".join(lines)

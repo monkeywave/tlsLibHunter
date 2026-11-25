@@ -8,6 +8,7 @@ from tlslibhunter.output._utils import attached_label
 from tlslibhunter.output._utils import human_size as _human_size
 
 if TYPE_CHECKING:
+    from tlslibhunter.multi_process import ProcessScanOutcome
     from tlslibhunter.scanner.results import ExtractionResult, ScanResult
 
 
@@ -127,3 +128,33 @@ class TableFormatter:
             status = "OK" if ext.success else f"FAILED: {ext.error}"
             lines.append(f"  {ext.library.name}: {status} ({ext.method}) -> {ext.output_path}")
         return "\n".join(lines)
+
+    def format_process_summary(self, target: str, outcomes: list[ProcessScanOutcome]) -> str:
+        """Combined --all-processes summary: one row per scanned process."""
+        from tlslibhunter.multi_process import summary_rows
+
+        try:
+            return self._format_summary_rich(target, summary_rows(outcomes))
+        except ImportError:
+            from tlslibhunter.output.plain_formatter import PlainFormatter
+
+            return PlainFormatter().format_process_summary(target, outcomes)
+
+    def _format_summary_rich(self, target: str, rows: list[tuple[str, str, str]]) -> str:
+        from io import StringIO
+
+        from rich.console import Console
+        from rich.markup import escape
+        from rich.table import Table
+
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True)
+        table = Table(title=f"All processes related to '{target}'")
+        table.add_column("Process", style="cyan")
+        table.add_column("PID", justify="right")
+        table.add_column("TLS libraries / error")
+        for name, pid, status in rows:
+            cell = escape(status)
+            table.add_row(escape(name), pid, f"[red]{cell}[/red]" if status.startswith("ERROR") else cell)
+        console.print(table)
+        return buf.getvalue()

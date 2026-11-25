@@ -145,8 +145,37 @@ class TLSLibHunter:
                 self._attached.get("name") or "?",
                 self._attached.get("pid"),
             )
+        self._hint_related_android_processes()
 
         self._initialized = True
+
+    @property
+    def attached_pid(self) -> int | None:
+        """PID of the process currently instrumented, or None before attach/after close."""
+        return (self._attached or {}).get("pid")
+
+    def _hint_related_android_processes(self) -> None:
+        """Point the user at sibling/delegate processes that may carry the TLS traffic.
+
+        Purely informational: any failure is logged at debug level and ignored.
+        """
+        # With --all-processes the related processes are scanned anyway, so the
+        # hint ("scan those PIDs") would only be noise.
+        if self._platform != "android" or self._config.all_processes:
+            return
+        try:
+            from tlslibhunter.utils import android_related
+
+            serial = self._config.device_serial or getattr(self._device, "id", None)
+            target_pid = (self._attached or {}).get("pid")
+            target = self._config.target
+            package = target if "." in target and not target.isdigit() else None
+            related = android_related.find_related_processes(serial, target_pid, package)
+            hint = android_related.format_related_hint(related)
+            if hint:
+                logger.log(*hint)
+        except Exception as e:  # never let a hint break the scan
+            logger.debug("Related-process lookup skipped: %s", e)
 
     def _attach_with_timeout_handling(self, target: int | str) -> Any:
         """Attach; on an Android Frida timeout, diagnose it or (with --unfreeze) fix it.

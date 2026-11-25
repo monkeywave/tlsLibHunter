@@ -6,7 +6,7 @@
 
 
 # TLSLibHunter
-![version](https://img.shields.io/badge/version-0.3.1-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
+![version](https://img.shields.io/badge/version-0.3.2-blue) [![PyPI version](https://badge.fury.io/py/tlslibhunter.svg)](https://badge.fury.io/py/tlslibhunter) [![Publish status](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/publish.yml)
 [![Lint](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml/badge.svg)](https://github.com/monkeywave/tlsLibHunter/actions/workflows/lint.yml)
 
 
@@ -34,6 +34,9 @@ tlsLibHunter com.example.app -m -l
 
 # JSON output
 tlsLibHunter firefox -l -f json
+
+# Android: scan the app AND its related processes (e.g. Gemini -> Google app)
+tlsLibHunter Gemini --serial ABC123 --unfreeze --all-processes -l
 
 # Full, unfiltered diagnostic scan (show known false positives + low-confidence hits)
 tlsLibHunter com.example.app -m -l --scan-everything
@@ -91,6 +94,26 @@ extractions = hunter.extract(result, output_dir="./extracted_libs")
 - Clean Python API for programmatic use
 - Backend abstraction (currently only frida but might be extended to other frameworks in the future)
 
+
+## Apps whose traffic runs in other processes (`--all-processes`)
+
+tlsLibHunter attaches to **one** process. On Android the TLS traffic is not always there: apps
+split work across several processes (`pkg:remote`, ...), and some are trampolines whose UI is
+hosted by another package. Example: the Gemini app (`com.google.android.apps.bard`) hands its UI
+to the Google app (`com.google.android.googlequicksearchbox:search`, `:googleapp`, ...).
+
+After attaching, tlsLibHunter therefore logs a hint naming those related processes (WARNING when
+another package hosts the foreground UI, INFO for other processes of the same app).
+
+With `--all-processes` (Android only) it scans the target first and then every related process
+(foreground-UI host first, then the app's other processes), each through the normal single-process
+scan with the same options (`--unfreeze`, `-o`, `-l`, `-d`, ...). A process that cannot be scanned
+(attach timeout, isolated/permission-denied, exited) is logged and skipped; the remaining scans
+continue. Each process gets its usual results table, followed by a combined summary table
+(process, PID, libraries found or error). With `-f json` a single combined document is printed:
+`{"target": ..., "processes": [{"process", "pid", "error", "scan", "extractions"}, ...]}`.
+Extracted libraries go to `./tls_libs_<pid>` per related process, or to `<DIR>/<pid>` with
+`-o DIR`. On other platforms the flag logs a warning and only the target is scanned.
 
 ## Result filtering & scan depth
 

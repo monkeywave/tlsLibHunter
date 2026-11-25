@@ -5,6 +5,28 @@ All notable changes to tlsLibHunter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file starts at 0.2.9; earlier versions are documented only in git history.
 
+## [0.3.2]
+
+### Added
+  - **Hint about related Android processes** — after attaching, tlsLibHunter
+    looks up the target's other processes (same package or same app UID) and
+    the package hosting the foreground UI. When another app hosts the UI it
+    logs a WARNING naming those PIDs, e.g. for the Gemini app
+    (`com.google.android.apps.bard`), whose launcher trampolines to the Google
+    app: "Foreground UI of 'com.google.android.apps.bard' is hosted by
+    'com.google.android.googlequicksearchbox' (PIDs 568 :search, 12274
+    :googleapp, ...). TLS traffic is likely there". Other processes of the
+    same app are reported at INFO.
+  - **`--all-processes`** (Android) — scans the target and then every related
+    process (UI host first, then sibling processes) through the regular
+    single-process scan with the same options (`--unfreeze`, `-o`/extraction
+    into per-PID directories, `-d`, ...). A process that cannot be scanned
+    (attach timeout, isolated/permission-denied, exited) is logged and the
+    remaining scans continue. Prints each process's table plus a combined
+    summary table; `-f json` prints one combined document. For Gemini this
+    finds the TLS libraries of the Google app processes that actually carry
+    its traffic. On other platforms it warns and scans only the target.
+
 ## [0.3.1]
 
 ### Fixed

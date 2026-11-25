@@ -31,6 +31,8 @@ class HunterConfig:
         scan_all_modules: Bypass TLS heuristic filter; scan every module except the hard skip-list.
         scan_everything: Scan every loaded module including libc/libm/ART; bypasses size filter.
         unfreeze: Android (root): unfreeze a target frozen by the cached-apps freezer and retry the attach once.
+        all_processes: Android: also scan the target's related processes (CLI orchestration; suppresses the
+            related-process hint since those processes are scanned anyway).
     """
 
     target: str = ""
@@ -53,6 +55,7 @@ class HunterConfig:
     scan_all_modules: bool = False
     scan_everything: bool = False
     unfreeze: bool = False
+    all_processes: bool = False
 
     def __post_init__(self):
         # Deprecation shim: if someone passes a string to mobile, migrate to serial

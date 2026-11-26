@@ -54,7 +54,7 @@ htmlcov/
 research/
 research_State.txt
 *.log
-tls_libs*
+tls_libs_*/
 
 # probe agent build (agent/probe)
 node_modules/
